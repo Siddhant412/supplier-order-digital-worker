@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+from app.domain.models import TradingPartnerProfile
+
+
+class TradingPartnerProfileRepository:
+    def __init__(self) -> None:
+        self._profiles = {
+            "SUP-100:855:004010": TradingPartnerProfile(
+                profile_id="SUP-100:855:004010",
+                supplier_id="SUP-100",
+                transaction_type="855",
+                edi_version="004010",
+                date_qualifiers={
+                    "067": "promised_delivery_date",
+                    "068": "promised_delivery_date",
+                    "002": "requested_delivery_date",
+                },
+                ack_codes={
+                    "IA": "accepted",
+                    "IQ": "accepted_quantity_changed",
+                    "IR": "rejected",
+                    "IB": "backordered",
+                },
+                repeated_ack_policy="split_quantities",
+                unknown_qualifier_policy="manual_review",
+            )
+        }
+
+    def get(self, supplier_id: str, transaction_type: str, edi_version: str) -> TradingPartnerProfile | None:
+        return self._profiles.get(f"{supplier_id}:{transaction_type}:{edi_version}")
+
+    def list(self) -> list[TradingPartnerProfile]:
+        return list(self._profiles.values())
