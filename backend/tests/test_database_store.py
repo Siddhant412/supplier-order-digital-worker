@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from app.domain.models import IngestRequest, WorkflowRecord, WorkflowStatus, new_id
 from app.services.database import DatabaseWorkflowStore
 from app.services.mock_erp import MockERPAdapter
+from app.services.policies import PolicyConfigRepository
 from app.services.profiles import TradingPartnerProfileRepository
 from app.services.workflow import WorkflowEngine
 
@@ -48,7 +49,7 @@ def test_database_store_persists_idempotency_and_erp_update_keys():
 
 def test_database_store_supports_workflow_duplicate_detection():
     store = make_store()
-    engine = WorkflowEngine(store, MockERPAdapter(), TradingPartnerProfileRepository())
+    engine = WorkflowEngine(store, MockERPAdapter(), TradingPartnerProfileRepository(), PolicyConfigRepository())
     edi_text = (ROOT / "sample-data" / "edi" / "exact-match.edi").read_text()
 
     first = engine.start(IngestRequest(edi_text=edi_text))

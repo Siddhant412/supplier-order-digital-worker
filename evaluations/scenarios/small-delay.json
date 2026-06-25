@@ -1,0 +1,13 @@
+{
+  "scenario_id": "small-delay",
+  "name": "Small delivery delay within policy",
+  "description": "A supplier acknowledgment delays a low-risk line by two days, which is within the published approval policy.",
+  "edi_file": "sample-data/edi/small-delay.edi",
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false
+  }
+}

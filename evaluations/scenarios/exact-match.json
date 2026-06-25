@@ -1,0 +1,13 @@
+{
+  "scenario_id": "exact-match",
+  "name": "Exact match auto-confirmation",
+  "description": "A supplier acknowledgment exactly matches the purchase order and should complete without approval.",
+  "edi_file": "sample-data/edi/exact-match.edi",
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false
+  }
+}

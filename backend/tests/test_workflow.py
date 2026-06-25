@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.domain.models import ApprovalRequest, IngestRequest, WorkflowStatus
 from app.services.mock_erp import MockERPAdapter
+from app.services.policies import PolicyConfigRepository
 from app.services.profiles import TradingPartnerProfileRepository
 from app.services.store import InMemoryStore
 from app.services.workflow import WorkflowEngine
@@ -15,7 +16,7 @@ def load_sample(name: str) -> str:
 
 
 def make_engine() -> WorkflowEngine:
-    return WorkflowEngine(InMemoryStore(), MockERPAdapter(), TradingPartnerProfileRepository())
+    return WorkflowEngine(InMemoryStore(), MockERPAdapter(), TradingPartnerProfileRepository(), PolicyConfigRepository())
 
 
 def test_exact_match_completes_without_approval():
@@ -28,6 +29,17 @@ def test_exact_match_completes_without_approval():
     assert workflow.policy_decision.decision == "AUTO_APPROVE"
     assert workflow.erp_update_command is not None
     assert workflow.supplier_response is not None
+
+
+def test_small_delivery_delay_within_policy_completes_without_approval():
+    engine = make_engine()
+
+    workflow = engine.start(IngestRequest(edi_text=load_sample("small-delay.edi")))
+
+    assert workflow.status == WorkflowStatus.COMPLETED
+    assert workflow.policy_decision is not None
+    assert workflow.policy_decision.decision == "AUTO_APPROVE"
+    assert workflow.erp_update_command is not None
 
 
 def test_risky_change_waits_for_approval_then_completes():

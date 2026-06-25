@@ -16,7 +16,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -32,6 +33,10 @@ button {
 
 button:hover {
   border-color: #607089;
+}
+
+button svg {
+  vertical-align: middle;
 }
 
 button:disabled {
@@ -127,6 +132,174 @@ button:disabled {
   background: #edf5ff;
 }
 
+.profile-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.policy-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.evaluation-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-grid,
+.policy-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.profile-list,
+.policy-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.profile-row,
+.policy-row {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 74px;
+  text-align: left;
+}
+
+.profile-row.active,
+.policy-row.active {
+  border-color: #2364aa;
+  background: #edf5ff;
+}
+
+.profile-row small,
+.policy-row small,
+.profile-editor-header span,
+.policy-editor-header span {
+  color: #657286;
+}
+
+.profile-editor,
+.policy-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.profile-editor-header,
+.policy-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-editor-header div,
+.policy-editor-header div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-editor-header strong,
+.policy-editor-header strong {
+  overflow-wrap: anywhere;
+}
+
+.profile-editor label,
+.policy-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.policy-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.policy-form input[type="text"],
+.policy-form input[type="number"],
+.policy-form input:not([type]) {
+  width: 100%;
+  border: 1px solid #c8d0db;
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.toggle-row {
+  align-content: start;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+}
+
+.toggle-row input {
+  margin: 2px 0 0;
+}
+
+.mapping-editor {
+  min-height: 120px;
+}
+
+.evaluation-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.evaluation-results {
+  display: grid;
+  gap: 10px;
+}
+
+.scenario-result {
+  border: 1px solid #d7dde6;
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.scenario-result.passed {
+  border-color: #98d7ae;
+  background: #fbfffc;
+}
+
+.scenario-result.failed {
+  border-color: #e6b0aa;
+  background: #fffafa;
+}
+
+.scenario-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scenario-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  color: #4c5a6e;
+  font-size: 13px;
+}
+
+.mismatch-list {
+  margin: 0;
+  padding-left: 20px;
+  color: #b42318;
+  font-size: 13px;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -213,6 +386,12 @@ textarea {
   border-color: #2364aa;
   color: #ffffff;
   font-weight: 700;
+}
+
+.action-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .primary-button:hover {
@@ -341,6 +520,17 @@ th {
   }
 
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .evaluation-header,
+  .scenario-fields,
+  .policy-grid,
+  .policy-form {
     grid-template-columns: 1fr;
   }
 }

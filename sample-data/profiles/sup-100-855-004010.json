@@ -1,8 +1,10 @@
 {
-  "profile_id": "SUP-100:855:004010",
+  "profile_id": "SUP-100:855:004010:v1",
   "supplier_id": "SUP-100",
   "transaction_type": "855",
   "edi_version": "004010",
+  "version": 1,
+  "status": "PUBLISHED",
   "date_qualifiers": {
     "067": "promised_delivery_date",
     "068": "promised_delivery_date",

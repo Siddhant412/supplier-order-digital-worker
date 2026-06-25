@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from app.domain.models import AuditEvent, WorkflowRecord, WorkflowStatus, utc_now
+from app.domain.models import AuditEvent, EvaluationRun, WorkflowRecord, WorkflowStatus, utc_now
 
 
 class WorkflowStore(Protocol):
@@ -21,6 +21,12 @@ class WorkflowStore(Protocol):
 
     def mark_erp_update(self, key: str, workflow_id: str) -> None: ...
 
+    def save_evaluation_run(self, run: EvaluationRun) -> EvaluationRun: ...
+
+    def get_evaluation_run(self, run_id: str) -> EvaluationRun: ...
+
+    def list_evaluation_runs(self) -> list[EvaluationRun]: ...
+
     def add_audit(
         self,
         workflow: WorkflowRecord,
@@ -36,6 +42,7 @@ class InMemoryStore:
     workflows: dict[str, WorkflowRecord] = field(default_factory=dict)
     idempotency_index: dict[str, str] = field(default_factory=dict)
     erp_update_index: set[str] = field(default_factory=set)
+    evaluation_runs: dict[str, EvaluationRun] = field(default_factory=dict)
 
     def save_workflow(self, workflow: WorkflowRecord) -> WorkflowRecord:
         workflow.updated_at = utc_now()
@@ -59,6 +66,16 @@ class InMemoryStore:
 
     def mark_erp_update(self, key: str, workflow_id: str) -> None:
         self.erp_update_index.add(key)
+
+    def save_evaluation_run(self, run: EvaluationRun) -> EvaluationRun:
+        self.evaluation_runs[run.run_id] = run
+        return run
+
+    def get_evaluation_run(self, run_id: str) -> EvaluationRun:
+        return self.evaluation_runs[run_id]
+
+    def list_evaluation_runs(self) -> list[EvaluationRun]:
+        return sorted(self.evaluation_runs.values(), key=lambda run: run.created_at, reverse=True)
 
     def add_audit(
         self,

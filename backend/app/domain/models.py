@@ -50,6 +50,17 @@ class PolicyDecisionType(str, Enum):
     MANUAL_REVIEW = "MANUAL_REVIEW"
 
 
+class ProfileStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
+
+
+class EvaluationStatus(str, Enum):
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+
+
 class EDIDelimiters(BaseModel):
     element: str
     segment: str
@@ -82,10 +93,16 @@ class TradingPartnerProfile(BaseModel):
     supplier_id: str
     transaction_type: str
     edi_version: str
+    version: int = 1
+    status: ProfileStatus = ProfileStatus.PUBLISHED
     date_qualifiers: dict[str, str]
     ack_codes: dict[str, str]
     repeated_ack_policy: Literal["split_quantities", "manual_review"] = "manual_review"
     unknown_qualifier_policy: Literal["manual_review", "reject"] = "manual_review"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    published_at: datetime | None = None
+    archived_at: datetime | None = None
 
 
 class SupplierConfirmationLine(BaseModel):
@@ -180,17 +197,25 @@ class ImpactAssessment(BaseModel):
 
 
 class PolicyConfig(BaseModel):
+    policy_id: str = "POLICY-DEFAULT:v1"
+    version: int = 1
+    status: ProfileStatus = ProfileStatus.PUBLISHED
     exact_match_auto_approve: bool = True
     maximum_price_increase_percent: float = 1.0
     maximum_delivery_delay_days: int = 2
     maximum_order_value: float = 5000
     require_no_stockout_impact: bool = True
     policy_version: str = "2026.07.01"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    published_at: datetime | None = None
+    archived_at: datetime | None = None
 
 
 class PolicyDecision(BaseModel):
     decision: PolicyDecisionType
     policy_version: str
+    policy_id: str = "UNKNOWN"
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -255,3 +280,75 @@ class IngestRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     approved_by: str = "operator@procureops.local"
     comments: str = ""
+
+
+class ProfileCreateRequest(BaseModel):
+    supplier_id: str
+    transaction_type: str = "855"
+    edi_version: str = "004010"
+    date_qualifiers: dict[str, str] = Field(default_factory=dict)
+    ack_codes: dict[str, str] = Field(default_factory=dict)
+    repeated_ack_policy: Literal["split_quantities", "manual_review"] = "manual_review"
+    unknown_qualifier_policy: Literal["manual_review", "reject"] = "manual_review"
+
+
+class ProfileUpdateRequest(BaseModel):
+    date_qualifiers: dict[str, str] | None = None
+    ack_codes: dict[str, str] | None = None
+    repeated_ack_policy: Literal["split_quantities", "manual_review"] | None = None
+    unknown_qualifier_policy: Literal["manual_review", "reject"] | None = None
+
+
+class PolicyCreateRequest(BaseModel):
+    exact_match_auto_approve: bool = True
+    maximum_price_increase_percent: float = 1.0
+    maximum_delivery_delay_days: int = 2
+    maximum_order_value: float = 5000
+    require_no_stockout_impact: bool = True
+    policy_version: str = "draft-v1"
+
+
+class PolicyUpdateRequest(BaseModel):
+    exact_match_auto_approve: bool | None = None
+    maximum_price_increase_percent: float | None = None
+    maximum_delivery_delay_days: int | None = None
+    maximum_order_value: float | None = None
+    require_no_stockout_impact: bool | None = None
+    policy_version: str | None = None
+
+
+class EvaluationExpectation(BaseModel):
+    workflow_status: WorkflowStatus
+    policy_decision: PolicyDecisionType | None = None
+    validation_status: ValidationStatus | None = None
+    erp_update_executed: bool
+    duplicate_of_existing: bool = False
+    profile_id_contains: str | None = None
+
+
+class EvaluationScenario(BaseModel):
+    scenario_id: str
+    name: str
+    description: str = ""
+    edi_file: str
+    expectation: EvaluationExpectation
+
+
+class EvaluationScenarioResult(BaseModel):
+    scenario_id: str
+    name: str
+    status: EvaluationStatus
+    workflow_id: str | None = None
+    mismatches: list[str] = Field(default_factory=list)
+    expected: EvaluationExpectation
+    actual: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvaluationRun(BaseModel):
+    run_id: str
+    created_at: datetime = Field(default_factory=utc_now)
+    status: EvaluationStatus
+    total: int
+    passed: int
+    failed: int
+    results: list[EvaluationScenarioResult]

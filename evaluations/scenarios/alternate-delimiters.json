@@ -1,0 +1,13 @@
+{
+  "scenario_id": "alternate-delimiters",
+  "name": "Alternate EDI delimiters",
+  "description": "The parser should detect delimiters from the envelope and process a valid EDI file that does not use the default separators.",
+  "edi_file": "sample-data/edi/alternate-delimiters.edi",
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false
+  }
+}

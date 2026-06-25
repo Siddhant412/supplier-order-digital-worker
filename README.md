@@ -17,6 +17,9 @@ This repository contains the first working vertical slice:
 7. Route exceptions for approval or safely update the mock ERP.
 8. Generate supplier communication and write an auditable event timeline.
 9. Persist workflow state, audit events, idempotency keys, and ERP update markers in PostgreSQL when `DATABASE_URL` is configured.
+10. Manage versioned trading partner profiles for EDI qualifier and acknowledgment-code interpretation.
+11. Manage versioned approval policies with draft, published, and archived lifecycle controls.
+12. Run evaluation scenarios and inspect pass/fail results from the operations console.
 
 ## Run Locally
 

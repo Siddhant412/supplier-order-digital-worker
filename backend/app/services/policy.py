@@ -31,15 +31,24 @@ class PolicyEngine:
             return PolicyDecision(
                 decision=PolicyDecisionType.MANUAL_REVIEW,
                 policy_version=self.config.policy_version,
+                policy_id=self.config.policy_id,
                 reasons=reasons,
             )
 
         all_differences = [difference for result in comparisons for difference in result.differences]
-        if not all_differences and self.config.exact_match_auto_approve:
+        if not all_differences:
+            if self.config.exact_match_auto_approve:
+                return PolicyDecision(
+                    decision=PolicyDecisionType.AUTO_APPROVE,
+                    policy_version=self.config.policy_version,
+                    policy_id=self.config.policy_id,
+                    reasons=["Exact match and policy allows automatic confirmation."],
+                )
             return PolicyDecision(
-                decision=PolicyDecisionType.AUTO_APPROVE,
+                decision=PolicyDecisionType.REQUIRE_APPROVAL,
                 policy_version=self.config.policy_version,
-                reasons=["Exact match and policy allows automatic confirmation."],
+                policy_id=self.config.policy_id,
+                reasons=["Exact-match automation is disabled by policy."],
             )
 
         for difference in all_differences:
@@ -56,18 +65,24 @@ class PolicyEngine:
             if difference.field in {"part_number", "unit"}:
                 reasons.append(f"{difference.field} change requires approval.")
 
-        if any(impact.stockout_risk for impact in impacts):
+        confirmed_order_value = sum(line.quantity * line.unit_price for line in confirmation.lines)
+        if all_differences and confirmed_order_value > self.config.maximum_order_value:
+            reasons.append(f"Confirmed order value exceeds ${self.config.maximum_order_value:,.2f} threshold.")
+
+        if self.config.require_no_stockout_impact and any(impact.stockout_risk for impact in impacts):
             reasons.append("Inventory impact creates stockout risk.")
 
         if reasons:
             return PolicyDecision(
                 decision=PolicyDecisionType.REQUIRE_APPROVAL,
                 policy_version=self.config.policy_version,
+                policy_id=self.config.policy_id,
                 reasons=reasons,
             )
 
         return PolicyDecision(
             decision=PolicyDecisionType.AUTO_APPROVE,
             policy_version=self.config.policy_version,
+            policy_id=self.config.policy_id,
             reasons=["Differences are within configured automatic approval thresholds."],
         )

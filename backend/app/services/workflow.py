@@ -27,7 +27,8 @@ from app.services.impact import ImpactAssessmentService
 from app.services.mock_erp import MockERPAdapter
 from app.services.notification import NotificationService
 from app.services.policy import PolicyEngine
-from app.services.profiles import TradingPartnerProfileRepository
+from app.services.policies import PolicyConfigStore
+from app.services.profiles import TradingPartnerProfileStore
 from app.services.store import WorkflowStore
 
 
@@ -42,7 +43,8 @@ class WorkflowEngine:
         self,
         store: WorkflowStore,
         erp: MockERPAdapter,
-        profiles: TradingPartnerProfileRepository,
+        profiles: TradingPartnerProfileStore,
+        policies: PolicyConfigStore,
     ) -> None:
         self.store = store
         self.erp = erp
@@ -50,7 +52,7 @@ class WorkflowEngine:
         self.interpreter = EDIInterpreter(profiles)
         self.comparison = ComparisonEngine()
         self.impact = ImpactAssessmentService(erp)
-        self.policy = PolicyEngine()
+        self.policies = policies
         self.notifications = NotificationService()
         self.graph = self._build_graph()
 
@@ -282,7 +284,12 @@ class WorkflowEngine:
     def _evaluate_policy(self, state: WorkflowState) -> WorkflowState:
         workflow = self.store.get_workflow(state["workflow_id"])
         assert workflow.confirmation is not None
-        workflow.policy_decision = self.policy.evaluate(workflow.confirmation, workflow.comparisons, workflow.impacts)
+        active_policy = self.policies.get_active()
+        workflow.policy_decision = PolicyEngine(active_policy).evaluate(
+            workflow.confirmation,
+            workflow.comparisons,
+            workflow.impacts,
+        )
         workflow.status = WorkflowStatus.POLICY_EVALUATED
         self.store.add_audit(
             workflow,

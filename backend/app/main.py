@@ -3,8 +3,19 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.dependencies import erp, profiles, store, workflow_engine
-from app.domain.models import ApprovalRequest, IngestRequest, WorkflowRecord
+from app.dependencies import erp, evaluation_runner, policies, profiles, store, workflow_engine
+from app.domain.models import (
+    ApprovalRequest,
+    EvaluationRun,
+    IngestRequest,
+    PolicyConfig,
+    PolicyCreateRequest,
+    PolicyUpdateRequest,
+    ProfileCreateRequest,
+    ProfileUpdateRequest,
+    TradingPartnerProfile,
+    WorkflowRecord,
+)
 
 
 app = FastAPI(title="ProcureOps AI API", version="0.1.0")
@@ -61,8 +72,87 @@ def reject_workflow(workflow_id: str, request: ApprovalRequest) -> WorkflowRecor
 
 
 @app.get("/api/profiles")
-def list_profiles():
+def list_profiles() -> list[TradingPartnerProfile]:
     return profiles.list()
+
+
+@app.get("/api/profiles/{profile_id}", response_model=TradingPartnerProfile)
+def get_profile(profile_id: str) -> TradingPartnerProfile:
+    try:
+        return profiles.get_by_id(profile_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Profile not found.") from exc
+
+
+@app.post("/api/profiles", response_model=TradingPartnerProfile)
+def create_profile(request: ProfileCreateRequest) -> TradingPartnerProfile:
+    return profiles.create(request)
+
+
+@app.patch("/api/profiles/{profile_id}", response_model=TradingPartnerProfile)
+def update_profile(profile_id: str, request: ProfileUpdateRequest) -> TradingPartnerProfile:
+    try:
+        return profiles.update(profile_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Profile not found.") from exc
+
+
+@app.post("/api/profiles/{profile_id}/publish", response_model=TradingPartnerProfile)
+def publish_profile(profile_id: str) -> TradingPartnerProfile:
+    try:
+        return profiles.publish(profile_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Profile not found.") from exc
+
+
+@app.post("/api/profiles/{profile_id}/archive", response_model=TradingPartnerProfile)
+def archive_profile(profile_id: str) -> TradingPartnerProfile:
+    try:
+        return profiles.archive(profile_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Profile not found.") from exc
+
+
+@app.get("/api/policies", response_model=list[PolicyConfig])
+def list_policies() -> list[PolicyConfig]:
+    return policies.list()
+
+
+@app.get("/api/policies/{policy_id}", response_model=PolicyConfig)
+def get_policy(policy_id: str) -> PolicyConfig:
+    try:
+        return policies.get_by_id(policy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Policy not found.") from exc
+
+
+@app.post("/api/policies", response_model=PolicyConfig)
+def create_policy(request: PolicyCreateRequest) -> PolicyConfig:
+    return policies.create(request)
+
+
+@app.patch("/api/policies/{policy_id}", response_model=PolicyConfig)
+def update_policy(policy_id: str, request: PolicyUpdateRequest) -> PolicyConfig:
+    try:
+        return policies.update(policy_id, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Policy not found.") from exc
+
+
+@app.post("/api/policies/{policy_id}/publish", response_model=PolicyConfig)
+def publish_policy(policy_id: str) -> PolicyConfig:
+    try:
+        return policies.publish(policy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Policy not found.") from exc
+
+
+@app.post("/api/policies/{policy_id}/archive", response_model=PolicyConfig)
+def archive_policy(policy_id: str) -> PolicyConfig:
+    try:
+        return policies.archive(policy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Policy not found.") from exc
 
 
 @app.get("/api/mock-erp/purchase-orders/{po_number}")
@@ -71,6 +161,27 @@ def get_purchase_order(po_number: str):
         return erp.get_purchase_order(po_number)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Purchase order not found.") from exc
+
+
+@app.post("/api/evaluations/run", response_model=EvaluationRun)
+def run_evaluations() -> EvaluationRun:
+    try:
+        return evaluation_runner.run_all()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/evaluations/runs", response_model=list[EvaluationRun])
+def list_evaluation_runs() -> list[EvaluationRun]:
+    return store.list_evaluation_runs()
+
+
+@app.get("/api/evaluations/runs/{run_id}", response_model=EvaluationRun)
+def get_evaluation_run(run_id: str) -> EvaluationRun:
+    try:
+        return store.get_evaluation_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Evaluation run not found.") from exc
 
 
 @app.get("/api/metrics")

@@ -1,0 +1,13 @@
+{
+  "scenario_id": "risky-change",
+  "name": "Risky quantity price and date change",
+  "description": "A supplier acknowledgment reduces quantity, increases price, and delays delivery, so ERP mutation should wait for approval.",
+  "edi_file": "sample-data/edi/risky-change.edi",
+  "expectation": {
+    "workflow_status": "AWAITING_APPROVAL",
+    "policy_decision": "REQUIRE_APPROVAL",
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

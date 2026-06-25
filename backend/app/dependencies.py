@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
-from app.services.database import DatabaseWorkflowStore
+from app.services.database import DatabasePolicyConfigRepository, DatabaseTradingPartnerProfileRepository, DatabaseWorkflowStore
+from app.services.evaluations import EvaluationRunner
 from app.services.mock_erp import MockERPAdapter
+from app.services.policies import PolicyConfigRepository
 from app.services.profiles import TradingPartnerProfileRepository
 from app.services.store import InMemoryStore
 from app.services.workflow import WorkflowEngine
@@ -18,7 +21,42 @@ def create_store():
     return db_store
 
 
+def create_profiles():
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return TradingPartnerProfileRepository()
+    profile_repo = DatabaseTradingPartnerProfileRepository(database_url)
+    profile_repo.initialize()
+    return profile_repo
+
+
+def create_policies():
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return PolicyConfigRepository()
+    policy_repo = DatabasePolicyConfigRepository(database_url)
+    policy_repo.initialize()
+    return policy_repo
+
+
+def find_project_root() -> Path:
+    candidates = [Path("/app"), Path(__file__).resolve().parents[2]]
+    for candidate in candidates:
+        if (candidate / "evaluations" / "scenarios").exists() and (candidate / "sample-data").exists():
+            return candidate
+    return Path(__file__).resolve().parents[2]
+
+
 store = create_store()
 erp = MockERPAdapter()
-profiles = TradingPartnerProfileRepository()
-workflow_engine = WorkflowEngine(store=store, erp=erp, profiles=profiles)
+profiles = create_profiles()
+policies = create_policies()
+workflow_engine = WorkflowEngine(store=store, erp=erp, profiles=profiles, policies=policies)
+project_root = find_project_root()
+evaluation_runner = EvaluationRunner(
+    store=store,
+    profiles=profiles,
+    policies=policies,
+    scenario_dir=project_root / "evaluations" / "scenarios",
+    project_root=project_root,
+)
