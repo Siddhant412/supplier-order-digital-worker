@@ -16,6 +16,7 @@ This repository contains the first working vertical slice:
 6. Apply configurable approval policies.
 7. Route exceptions for approval or safely update the mock ERP.
 8. Generate supplier communication and write an auditable event timeline.
+9. Persist workflow state, audit events, idempotency keys, and ERP update markers in PostgreSQL when `DATABASE_URL` is configured.
 
 ## Run Locally
 
@@ -37,7 +38,7 @@ Run backend tests:
 PYTHONPATH=backend pytest -q backend/tests
 ```
 
-The current backend uses an in-memory workflow store for the vertical slice. PostgreSQL is included in Docker Compose as the target persistence service for the next implementation step.
+Docker Compose runs the backend with PostgreSQL persistence enabled through `DATABASE_URL`. If `DATABASE_URL` is not set, the backend falls back to an in-memory store for isolated local tests.
 
 ## Principles
 

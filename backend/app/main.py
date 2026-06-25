@@ -20,7 +20,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "store": store.__class__.__name__}
 
 
 @app.post("/api/ingest", response_model=WorkflowRecord)

@@ -145,7 +145,7 @@ class EDIInterpreter:
     def _part_numbers(self, po1) -> tuple[str, str | None]:
         supplier_part = "UNKNOWN"
         internal_part: str | None = None
-        elements = po1.elements
+        elements = self._elements(po1)
         for index in range(6, len(elements) - 1, 2):
             qualifier = elements[index]
             value = elements[index + 1]
@@ -173,7 +173,13 @@ class EDIInterpreter:
             return None
 
     def _safe(self, segment, index: int, default=None):
-        if index >= len(segment.elements):
+        elements = self._elements(segment)
+        if index >= len(elements):
             return default
-        value = segment.elements[index]
+        value = elements[index]
         return value if value != "" else default
+
+    def _elements(self, segment) -> list[str]:
+        if isinstance(segment, dict):
+            return segment.get("elements", [])
+        return segment.elements

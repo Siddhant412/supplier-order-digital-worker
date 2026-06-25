@@ -1,8 +1,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from app.domain.models import AuditEvent, WorkflowRecord, WorkflowStatus, utc_now
+
+
+class WorkflowStore(Protocol):
+    def save_workflow(self, workflow: WorkflowRecord) -> WorkflowRecord: ...
+
+    def get_workflow(self, workflow_id: str) -> WorkflowRecord: ...
+
+    def list_workflows(self) -> list[WorkflowRecord]: ...
+
+    def index_idempotency_key(self, key: str, workflow_id: str) -> None: ...
+
+    def find_by_idempotency_key(self, key: str) -> str | None: ...
+
+    def has_erp_update(self, key: str) -> bool: ...
+
+    def mark_erp_update(self, key: str, workflow_id: str) -> None: ...
+
+    def add_audit(
+        self,
+        workflow: WorkflowRecord,
+        event_type: str,
+        summary: str,
+        metadata: dict | None = None,
+        actor_type: str = "system",
+    ) -> AuditEvent: ...
 
 
 @dataclass
@@ -27,6 +53,12 @@ class InMemoryStore:
 
     def find_by_idempotency_key(self, key: str) -> str | None:
         return self.idempotency_index.get(key)
+
+    def has_erp_update(self, key: str) -> bool:
+        return key in self.erp_update_index
+
+    def mark_erp_update(self, key: str, workflow_id: str) -> None:
+        self.erp_update_index.add(key)
 
     def add_audit(
         self,

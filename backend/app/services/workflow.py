@@ -28,7 +28,7 @@ from app.services.mock_erp import MockERPAdapter
 from app.services.notification import NotificationService
 from app.services.policy import PolicyEngine
 from app.services.profiles import TradingPartnerProfileRepository
-from app.services.store import InMemoryStore
+from app.services.store import WorkflowStore
 
 
 class WorkflowState(TypedDict, total=False):
@@ -40,7 +40,7 @@ class WorkflowState(TypedDict, total=False):
 class WorkflowEngine:
     def __init__(
         self,
-        store: InMemoryStore,
+        store: WorkflowStore,
         erp: MockERPAdapter,
         profiles: TradingPartnerProfileRepository,
     ) -> None:
@@ -321,7 +321,7 @@ class WorkflowEngine:
         workflow = self.store.get_workflow(state["workflow_id"])
         assert workflow.confirmation is not None
         key = f"{workflow.idempotency_key}:erp-update"
-        if key in self.store.erp_update_index:
+        if self.store.has_erp_update(key):
             self.store.add_audit(workflow, "ERP_UPDATE_SKIPPED", "ERP update already executed for this workflow.")
             return state
 
@@ -341,7 +341,7 @@ class WorkflowEngine:
             idempotency_key=key,
         )
         result = self.erp.update_purchase_order_lines(workflow.confirmation.purchase_order_number, updates)
-        self.store.erp_update_index.add(key)
+        self.store.mark_erp_update(key, workflow.workflow_id)
         workflow.status = WorkflowStatus.ERP_UPDATED
         self.store.add_audit(
             workflow,

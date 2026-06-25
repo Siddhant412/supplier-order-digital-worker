@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://procureops:procureops@postgres:5432/procureops
+      DATABASE_URL: postgresql+psycopg://procureops:procureops@postgres:5432/procureops
     depends_on:
       - postgres
 
