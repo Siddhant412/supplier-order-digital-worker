@@ -7,6 +7,8 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+psycopg://procureops:procureops@postgres:5432/procureops
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
     depends_on:
       - postgres
 

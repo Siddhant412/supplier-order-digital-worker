@@ -14,12 +14,22 @@ This repository contains the first working vertical slice:
 4. Compare line-level quantities, prices, units, dates, and part identities.
 5. Assess inventory and shortage impact.
 6. Apply configurable approval policies.
-7. Route exceptions for approval or safely update the mock ERP.
-8. Generate supplier communication and write an auditable event timeline.
-9. Persist workflow state, audit events, idempotency keys, and ERP update markers in PostgreSQL when `DATABASE_URL` is configured.
-10. Manage versioned trading partner profiles for EDI qualifier and acknowledgment-code interpretation.
-11. Manage versioned approval policies with draft, published, and archived lifecycle controls.
-12. Run evaluation scenarios and inspect pass/fail results from the operations console.
+7. Route exceptions through approve, reject, clarification, and manual-review resolution decisions.
+8. Edit supplier-facing response content before human approval actions are recorded.
+9. Generate supplier communication and write an auditable event timeline backed by append-only audit event records.
+10. Handle deterministic unit conversion, currency changes, repeated ACK interpretation, unknown parts, and part substitutions.
+11. Persist workflow state, audit events, idempotency keys, and ERP update markers in PostgreSQL when `DATABASE_URL` is configured.
+12. Create and manage versioned trading partner profiles for EDI qualifier and acknowledgment-code interpretation.
+13. Create and manage versioned approval policies with draft, published, and archived lifecycle controls.
+14. Retry transient ERP lookup failures.
+15. Retry failed supplier notifications without repeating ERP updates.
+16. Filter and search the workflow queue by status, supplier, purchase order, and priority.
+17. Reprocess manual-review workflows after profile or policy fixes.
+18. Reset mock ERP seed data for repeatable local scenarios.
+19. Inspect purchase-order and supplier-confirmation lines side by side.
+20. Inspect ERP before/after snapshots and filter workflow audit events by event type, actor, and text.
+21. Generate redacted, schema-validated operator briefs from workflow facts with deterministic fallback and optional OpenAI Responses API support.
+22. Run evaluation scenarios and inspect pass/fail results from the operations console.
 
 ## Run Locally
 
@@ -42,6 +52,14 @@ PYTHONPATH=backend pytest -q backend/tests
 ```
 
 Docker Compose runs the backend with PostgreSQL persistence enabled through `DATABASE_URL`. If `DATABASE_URL` is not set, the backend falls back to an in-memory store for isolated local tests.
+
+Optional operator-brief generation uses deterministic fallback by default. To enable model-generated briefs, set:
+
+```bash
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=gpt-5.4-mini
+export OPENAI_TIMEOUT_SECONDS=20
+```
 
 ## Principles
 

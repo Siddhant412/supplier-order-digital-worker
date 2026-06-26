@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.dependencies import erp, evaluation_runner, policies, profiles, store, workflow_engine
+from app.dependencies import briefing_service, erp, evaluation_runner, policies, profiles, store, workflow_engine
 from app.domain.models import (
     ApprovalRequest,
     EvaluationRun,
     IngestRequest,
+    OperatorBrief,
     PolicyConfig,
     PolicyCreateRequest,
     PolicyUpdateRequest,
@@ -69,6 +70,47 @@ def reject_workflow(workflow_id: str, request: ApprovalRequest) -> WorkflowRecor
         return workflow_engine.reject(workflow_id, request)
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/request-clarification", response_model=WorkflowRecord)
+def request_workflow_clarification(workflow_id: str, request: ApprovalRequest) -> WorkflowRecord:
+    try:
+        return workflow_engine.request_clarification(workflow_id, request)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/retry-notification", response_model=WorkflowRecord)
+def retry_workflow_notification(workflow_id: str) -> WorkflowRecord:
+    try:
+        return workflow_engine.retry_notification(workflow_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/reprocess", response_model=WorkflowRecord)
+def reprocess_workflow(workflow_id: str) -> WorkflowRecord:
+    try:
+        return workflow_engine.reprocess(workflow_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/brief", response_model=OperatorBrief)
+def generate_operator_brief(workflow_id: str) -> OperatorBrief:
+    try:
+        workflow = store.get_workflow(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found.") from exc
+    brief = briefing_service.generate(workflow)
+    workflow.operator_brief = brief
+    store.add_audit(
+        workflow,
+        "OPERATOR_BRIEF_GENERATED",
+        "Operator brief generated from workflow facts.",
+        {"source": brief.source, "model": brief.model},
+    )
+    return brief
 
 
 @app.get("/api/profiles")
@@ -163,6 +205,12 @@ def get_purchase_order(po_number: str):
         raise HTTPException(status_code=404, detail="Purchase order not found.") from exc
 
 
+@app.post("/api/mock-erp/reset")
+def reset_mock_erp() -> dict[str, str]:
+    erp.reset()
+    return {"status": "reset"}
+
+
 @app.post("/api/evaluations/run", response_model=EvaluationRun)
 def run_evaluations() -> EvaluationRun:
     try:
@@ -195,11 +243,28 @@ def metrics() -> dict:
     ]
     awaiting = [workflow for workflow in workflows if workflow.status == "AWAITING_APPROVAL"]
     manual = [workflow for workflow in workflows if workflow.status == "MANUAL_REVIEW"]
+    completed = [workflow for workflow in workflows if workflow.status == "COMPLETED"]
+    retry_pending = [workflow for workflow in workflows if workflow.status == "RETRY_PENDING"]
+    dead_letter = [workflow for workflow in workflows if workflow.status == "DEAD_LETTER"]
+    rejected = [workflow for workflow in workflows if workflow.status == "REJECTED"]
+    clarification = [workflow for workflow in workflows if workflow.status == "CLARIFICATION_REQUESTED"]
+    failed_notifications = [
+        workflow for workflow in workflows if workflow.supplier_response and workflow.supplier_response.status == "failed"
+    ]
+    workflows_with_approval = [workflow for workflow in workflows if workflow.approval_history]
     return {
         "total_workflows": total,
+        "completed": len(completed),
         "automatic_processing_rate": (len(auto_completed) / total) if total else 0,
-        "human_review_rate": ((len(awaiting) + len(manual)) / total) if total else 0,
+        "human_review_rate": ((len(awaiting) + len(manual) + len(clarification)) / total) if total else 0,
         "awaiting_approval": len(awaiting),
         "manual_review": len(manual),
+        "retry_pending": len(retry_pending),
+        "dead_letter": len(dead_letter),
+        "rejected": len(rejected),
+        "clarification_requested": len(clarification),
+        "failed_notifications": len(failed_notifications),
+        "approval_action_count": sum(len(workflow.approval_history) for workflow in workflows),
+        "workflows_with_approval_rate": (len(workflows_with_approval) / total) if total else 0,
         "false_autonomous_action_rate": 0,
     }

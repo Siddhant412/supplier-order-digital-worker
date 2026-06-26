@@ -15,6 +15,8 @@ from app.domain.models import (
     ERPUpdateCommand,
     IngestRequest,
     PolicyDecisionType,
+    Supplier,
+    SupplierResponse,
     ValidationStatus,
     WorkflowRecord,
     WorkflowStatus,
@@ -23,9 +25,9 @@ from app.domain.models import (
 from app.services.comparison import ComparisonEngine
 from app.services.edi_interpreter import EDIInterpreter
 from app.services.edi_parser import EDIParser
+from app.services.erp import ERPAdapter, TransientERPError
 from app.services.impact import ImpactAssessmentService
-from app.services.mock_erp import MockERPAdapter
-from app.services.notification import NotificationService
+from app.services.notification import NotificationService, TransientNotificationError
 from app.services.policy import PolicyEngine
 from app.services.policies import PolicyConfigStore
 from app.services.profiles import TradingPartnerProfileStore
@@ -36,15 +38,17 @@ class WorkflowState(TypedDict, total=False):
     workflow_id: str
     raw_edi: str
     route: str
+    reprocess_of: str
 
 
 class WorkflowEngine:
     def __init__(
         self,
         store: WorkflowStore,
-        erp: MockERPAdapter,
+        erp: ERPAdapter,
         profiles: TradingPartnerProfileStore,
         policies: PolicyConfigStore,
+        notifications: NotificationService | None = None,
     ) -> None:
         self.store = store
         self.erp = erp
@@ -53,20 +57,54 @@ class WorkflowEngine:
         self.comparison = ComparisonEngine()
         self.impact = ImpactAssessmentService(erp)
         self.policies = policies
-        self.notifications = NotificationService()
+        self.notifications = notifications or NotificationService()
         self.graph = self._build_graph()
 
     def start(self, request: IngestRequest) -> WorkflowRecord:
+        return self._start(request.edi_text)
+
+    def reprocess(self, workflow_id: str) -> WorkflowRecord:
+        original = self.store.get_workflow(workflow_id)
+        if original.status not in {
+            WorkflowStatus.MANUAL_REVIEW,
+            WorkflowStatus.DEAD_LETTER,
+            WorkflowStatus.CLARIFICATION_REQUESTED,
+            WorkflowStatus.REJECTED,
+        }:
+            raise ValueError("Only manual review, dead-letter, clarification, or rejected workflows can be reprocessed.")
+        if not original.raw_payload:
+            raise ValueError("Workflow does not retain a source payload for reprocessing.")
+        reprocessed = self._start(original.raw_payload, reprocess_of=workflow_id)
+        self.store.add_audit(
+            original,
+            "WORKFLOW_REPROCESSED",
+            "Workflow source payload was reprocessed as a new workflow.",
+            {"new_workflow_id": reprocessed.workflow_id},
+            actor_type="user",
+        )
+        return reprocessed
+
+    def _start(self, edi_text: str, reprocess_of: str | None = None) -> WorkflowRecord:
         workflow = WorkflowRecord(
             workflow_id=new_id("WF"),
             correlation_id=new_id("CORR"),
             status=WorkflowStatus.RECEIVED,
-            raw_payload_hash=self._hash(request.edi_text),
+            raw_payload_hash=self._hash(edi_text),
+            raw_payload=edi_text,
         )
         self.store.save_workflow(workflow)
-        self.store.add_audit(workflow, "WORKFLOW_RECEIVED", "Received EDI supplier confirmation.")
+        self.store.add_audit(
+            workflow,
+            "WORKFLOW_RECEIVED",
+            "Received EDI supplier confirmation."
+            if reprocess_of is None
+            else "Received EDI supplier confirmation for reprocessing.",
+            {"reprocess_of": reprocess_of} if reprocess_of else {},
+        )
 
-        state: WorkflowState = {"workflow_id": workflow.workflow_id, "raw_edi": request.edi_text}
+        state: WorkflowState = {"workflow_id": workflow.workflow_id, "raw_edi": edi_text}
+        if reprocess_of:
+            state["reprocess_of"] = reprocess_of
         if self.graph:
             self.graph.invoke(state)
         else:
@@ -77,18 +115,14 @@ class WorkflowEngine:
         workflow = self.store.get_workflow(workflow_id)
         if workflow.status != WorkflowStatus.AWAITING_APPROVAL:
             raise ValueError("Workflow is not awaiting approval.")
-        workflow.approval = ApprovalRecord(
-            workflow_id=workflow.workflow_id,
-            decision="APPROVED",
-            approved_by=request.approved_by,
-            comments=request.comments,
-        )
+        approval = self._record_human_decision(workflow, "APPROVED", request)
         workflow.status = WorkflowStatus.APPROVED
+        self._stage_supplier_response(workflow, request, "approved")
         self.store.add_audit(
             workflow,
             "APPROVAL_RECORDED",
             "Approval recorded; workflow will resume ERP update.",
-            {"approved_by": request.approved_by, "comments": request.comments},
+            approval.model_dump(mode="json") | {"supplier_response_edited": self._has_supplier_response_override(request)},
             actor_type="user",
         )
         state: WorkflowState = {"workflow_id": workflow.workflow_id}
@@ -97,26 +131,76 @@ class WorkflowEngine:
         self._complete(state)
         return self.store.get_workflow(workflow_id)
 
-    def reject(self, workflow_id: str, request: ApprovalRequest) -> WorkflowRecord:
+    def retry_notification(self, workflow_id: str) -> WorkflowRecord:
         workflow = self.store.get_workflow(workflow_id)
-        if workflow.status != WorkflowStatus.AWAITING_APPROVAL:
-            raise ValueError("Workflow is not awaiting approval.")
-        workflow.approval = ApprovalRecord(
-            workflow_id=workflow.workflow_id,
-            decision="REJECTED",
-            approved_by=request.approved_by,
-            comments=request.comments,
-        )
-        workflow.status = WorkflowStatus.REJECTED
+        if workflow.status != WorkflowStatus.RETRY_PENDING:
+            raise ValueError("Workflow is not waiting for retry.")
+        if workflow.supplier_response is None or workflow.supplier_response.status != "failed":
+            raise ValueError("Workflow does not have a failed supplier response to retry.")
         self.store.add_audit(
             workflow,
-            "APPROVAL_REJECTED",
-            "Supplier changes rejected by approver.",
-            {"approved_by": request.approved_by, "comments": request.comments},
+            "SUPPLIER_NOTIFICATION_RETRY_STARTED",
+            "Retrying failed supplier notification without repeating ERP update.",
+        )
+        final_status = self._status_after_notification_retry(workflow)
+        self._send_supplier_response(workflow, final_status)
+        if final_status == WorkflowStatus.SUPPLIER_NOTIFIED:
+            self._complete({"workflow_id": workflow.workflow_id})
+        return self.store.get_workflow(workflow_id)
+
+    def reject(self, workflow_id: str, request: ApprovalRequest) -> WorkflowRecord:
+        workflow = self.store.get_workflow(workflow_id)
+        previous_status = workflow.status
+        if not self._can_record_negative_decision(workflow.status):
+            raise ValueError("Workflow is not awaiting approval or manual review.")
+        approval = self._record_human_decision(workflow, "REJECTED", request)
+        workflow.status = WorkflowStatus.REJECTED
+        self._stage_supplier_response(workflow, request, "rejected")
+        event_type = "MANUAL_REVIEW_REJECTED" if previous_status in self._manual_resolution_statuses() else "APPROVAL_REJECTED"
+        self.store.add_audit(
+            workflow,
+            event_type,
+            "Manual review rejected; ERP update remains blocked."
+            if event_type == "MANUAL_REVIEW_REJECTED"
+            else "Supplier changes rejected by approver.",
+            approval.model_dump(mode="json")
+            | {
+                "supplier_response_edited": self._has_supplier_response_override(request),
+                "previous_status": previous_status.value,
+            },
             actor_type="user",
         )
-        self.store.save_workflow(workflow)
-        return workflow
+        self._send_supplier_response(workflow, WorkflowStatus.REJECTED)
+        return self.store.get_workflow(workflow_id)
+
+    def request_clarification(self, workflow_id: str, request: ApprovalRequest) -> WorkflowRecord:
+        workflow = self.store.get_workflow(workflow_id)
+        previous_status = workflow.status
+        if not self._can_record_negative_decision(workflow.status):
+            raise ValueError("Workflow is not awaiting approval or manual review.")
+        approval = self._record_human_decision(workflow, "CLARIFICATION_REQUESTED", request)
+        workflow.status = WorkflowStatus.CLARIFICATION_REQUESTED
+        self._stage_supplier_response(workflow, request, "clarification")
+        event_type = (
+            "MANUAL_REVIEW_CLARIFICATION_REQUESTED"
+            if previous_status in self._manual_resolution_statuses()
+            else "CLARIFICATION_REQUESTED"
+        )
+        self.store.add_audit(
+            workflow,
+            event_type,
+            "Clarification requested from manual review; ERP update remains blocked."
+            if event_type == "MANUAL_REVIEW_CLARIFICATION_REQUESTED"
+            else "Clarification requested from supplier; ERP update remains paused.",
+            approval.model_dump(mode="json")
+            | {
+                "supplier_response_edited": self._has_supplier_response_override(request),
+                "previous_status": previous_status.value,
+            },
+            actor_type="user",
+        )
+        self._send_supplier_response(workflow, WorkflowStatus.CLARIFICATION_REQUESTED)
+        return self.store.get_workflow(workflow_id)
 
     def _build_graph(self):
         if StateGraph is None:
@@ -206,7 +290,7 @@ class WorkflowEngine:
         )
         workflow.idempotency_key = idempotency_key
         duplicate_of = self.store.find_by_idempotency_key(idempotency_key)
-        if duplicate_of:
+        if duplicate_of and duplicate_of != state.get("reprocess_of"):
             workflow.duplicate_of = duplicate_of
             workflow.status = WorkflowStatus.COMPLETED
             self.store.add_audit(
@@ -228,7 +312,10 @@ class WorkflowEngine:
                 "errors": confirmation.errors,
             },
         )
-        if confirmation.validation_status in {ValidationStatus.MANUAL_REVIEW_REQUIRED, ValidationStatus.REJECTED}:
+        if confirmation.validation_status == ValidationStatus.REJECTED:
+            workflow.status = WorkflowStatus.DEAD_LETTER
+            self.store.add_audit(workflow, "DEAD_LETTER", "EDI payload is rejected and cannot continue safely.")
+        elif confirmation.validation_status == ValidationStatus.MANUAL_REVIEW_REQUIRED:
             workflow.status = WorkflowStatus.MANUAL_REVIEW
             self.store.add_audit(workflow, "MANUAL_REVIEW_REQUIRED", "EDI semantics require manual review.")
         self.store.save_workflow(workflow)
@@ -238,14 +325,17 @@ class WorkflowEngine:
         workflow = self.store.get_workflow(state["workflow_id"])
         if workflow.duplicate_of:
             return "duplicate"
-        if workflow.status == WorkflowStatus.MANUAL_REVIEW:
+        if workflow.status in {WorkflowStatus.MANUAL_REVIEW, WorkflowStatus.DEAD_LETTER}:
             return "manual_review"
         return "continue"
 
     def _retrieve_purchase_order(self, state: WorkflowState) -> WorkflowState:
         workflow = self.store.get_workflow(state["workflow_id"])
         assert workflow.confirmation is not None
-        workflow.purchase_order = self.erp.get_purchase_order(workflow.confirmation.purchase_order_number)
+        workflow.purchase_order = self._get_purchase_order_with_retry(
+            workflow,
+            workflow.confirmation.purchase_order_number,
+        )
         workflow.status = WorkflowStatus.PO_RETRIEVED
         self.store.add_audit(
             workflow,
@@ -335,8 +425,8 @@ class WorkflowEngine:
         updates = [
             {
                 "line_id": line.supplier_line_id,
-                "quantity": line.quantity,
-                "unit_price": line.unit_price,
+                "quantity": line.normalized_quantity or line.quantity,
+                "unit_price": line.normalized_unit_price or line.unit_price,
                 "promised_date": line.promised_date,
             }
             for line in workflow.confirmation.lines
@@ -361,19 +451,17 @@ class WorkflowEngine:
     def _notify_supplier(self, state: WorkflowState) -> WorkflowState:
         workflow = self.store.get_workflow(state["workflow_id"])
         assert workflow.confirmation is not None
-        supplier = self.erp.get_supplier(workflow.confirmation.supplier_id)
-        workflow.supplier_response = self.notifications.build_supplier_response(workflow, supplier, workflow.confirmation)
-        workflow.status = WorkflowStatus.SUPPLIER_NOTIFIED
-        self.store.add_audit(
-            workflow,
-            "SUPPLIER_NOTIFIED",
-            "Supplier response generated and marked sent.",
-            workflow.supplier_response.model_dump(mode="json"),
-        )
+        if workflow.supplier_response is None:
+            supplier = self.erp.get_supplier(workflow.confirmation.supplier_id)
+            workflow.supplier_response = self.notifications.build_supplier_response(workflow, supplier, workflow.confirmation)
+        self._send_supplier_response(workflow, WorkflowStatus.SUPPLIER_NOTIFIED)
         return state
 
     def _complete(self, state: WorkflowState) -> WorkflowState:
         workflow = self.store.get_workflow(state["workflow_id"])
+        if workflow.status == WorkflowStatus.RETRY_PENDING:
+            self.store.save_workflow(workflow)
+            return state
         if workflow.status != WorkflowStatus.COMPLETED:
             workflow.status = WorkflowStatus.COMPLETED
             self.store.add_audit(workflow, "WORKFLOW_COMPLETED", "Workflow completed.")
@@ -387,3 +475,124 @@ class WorkflowEngine:
     def _idempotency_key(self, supplier_id: str, po_number: str, source_control_number: str, payload_hash: str) -> str:
         source = source_control_number if source_control_number != "UNKNOWN" else payload_hash
         return f"{supplier_id}:{po_number}:{source}"
+
+    def _record_human_decision(
+        self,
+        workflow: WorkflowRecord,
+        decision: str,
+        request: ApprovalRequest,
+    ) -> ApprovalRecord:
+        approval = ApprovalRecord(
+            workflow_id=workflow.workflow_id,
+            decision=decision,  # type: ignore[arg-type]
+            approved_by=request.approved_by,
+            comments=request.comments,
+        )
+        workflow.approval = approval
+        workflow.approval_history.append(approval)
+        return approval
+
+    def _stage_supplier_response(
+        self,
+        workflow: WorkflowRecord,
+        request: ApprovalRequest,
+        outcome: str,
+    ) -> None:
+        assert workflow.confirmation is not None
+        supplier = self._supplier_for_response(workflow)
+        if outcome == "rejected":
+            generated = self.notifications.build_rejection_response(
+                workflow,
+                supplier,
+                workflow.confirmation,
+                request.comments,
+            )
+        elif outcome == "clarification":
+            generated = self.notifications.build_clarification_response(
+                workflow,
+                supplier,
+                workflow.confirmation,
+                request.comments,
+            )
+        else:
+            generated = self.notifications.build_supplier_response(workflow, supplier, workflow.confirmation)
+        workflow.supplier_response = SupplierResponse(
+            workflow_id=workflow.workflow_id,
+            recipient=generated.recipient,
+            subject=request.supplier_response_subject or generated.subject,
+            body=request.supplier_response_body or generated.body,
+            status="queued",
+        )
+
+    def _send_supplier_response(self, workflow: WorkflowRecord, final_status: WorkflowStatus) -> None:
+        assert workflow.supplier_response is not None
+        try:
+            workflow.supplier_response = self.notifications.send_supplier_response(workflow, workflow.supplier_response)
+        except TransientNotificationError as exc:
+            workflow.supplier_response.status = "failed"
+            workflow.status = WorkflowStatus.RETRY_PENDING
+            self.store.add_audit(
+                workflow,
+                "SUPPLIER_NOTIFICATION_FAILED",
+                "Supplier notification failed and is waiting for retry.",
+                {"error": str(exc), "supplier_response": workflow.supplier_response.model_dump(mode="json")},
+            )
+            return
+        workflow.status = final_status
+        self.store.add_audit(
+            workflow,
+            "SUPPLIER_NOTIFIED",
+            "Supplier response generated and marked sent.",
+            workflow.supplier_response.model_dump(mode="json"),
+        )
+
+    def _has_supplier_response_override(self, request: ApprovalRequest) -> bool:
+        return bool(request.supplier_response_subject or request.supplier_response_body)
+
+    def _manual_resolution_statuses(self) -> set[WorkflowStatus]:
+        return {WorkflowStatus.MANUAL_REVIEW, WorkflowStatus.DEAD_LETTER}
+
+    def _can_record_negative_decision(self, status: WorkflowStatus) -> bool:
+        return status == WorkflowStatus.AWAITING_APPROVAL or status in self._manual_resolution_statuses()
+
+    def _supplier_for_response(self, workflow: WorkflowRecord) -> Supplier:
+        assert workflow.confirmation is not None
+        try:
+            return self.erp.get_supplier(workflow.confirmation.supplier_id)
+        except KeyError:
+            return Supplier(
+                supplier_id=workflow.confirmation.supplier_id,
+                name=workflow.confirmation.supplier_id,
+                email="manual-review@example.local",
+                automation_enabled=False,
+            )
+
+    def _status_after_notification_retry(self, workflow: WorkflowRecord) -> WorkflowStatus:
+        if workflow.approval and workflow.approval.decision == "REJECTED":
+            return WorkflowStatus.REJECTED
+        if workflow.approval and workflow.approval.decision == "CLARIFICATION_REQUESTED":
+            return WorkflowStatus.CLARIFICATION_REQUESTED
+        return WorkflowStatus.SUPPLIER_NOTIFIED
+
+    def _get_purchase_order_with_retry(self, workflow: WorkflowRecord, po_number: str) -> Any:
+        attempts = 2
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.erp.get_purchase_order(po_number)
+            except TransientERPError as exc:
+                self.store.add_audit(
+                    workflow,
+                    "ERP_LOOKUP_RETRY",
+                    "Temporary ERP lookup failure; retrying purchase order retrieval.",
+                    {"attempt": attempt, "max_attempts": attempts, "error": str(exc)},
+                )
+                if attempt == attempts:
+                    workflow.status = WorkflowStatus.RETRY_PENDING
+                    self.store.add_audit(
+                        workflow,
+                        "ERP_LOOKUP_RETRY_EXHAUSTED",
+                        "ERP lookup retry attempts exhausted.",
+                        {"error": str(exc)},
+                    )
+                    raise
+        raise RuntimeError("ERP lookup retry loop exited unexpectedly.")

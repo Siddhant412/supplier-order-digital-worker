@@ -1,0 +1,17 @@
+{
+  "scenario_id": "notification-retry",
+  "name": "Notification failure recovers without duplicate ERP update",
+  "description": "A supplier notification fails after ERP update, then retries only notification and completes.",
+  "edi_file": "sample-data/edi/notification-retry.edi",
+  "simulate_notification_failure_once": true,
+  "retry_notification_after_failure": true,
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false,
+    "notification_status": "sent",
+    "notification_retry_executed": true
+  }
+}

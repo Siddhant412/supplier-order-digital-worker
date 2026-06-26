@@ -1,0 +1,13 @@
+{
+  "scenario_id": "unsupported-unit",
+  "name": "Unsupported unit mismatch",
+  "description": "A supplier acknowledges a unit without a configured conversion, so the workflow must route to manual review.",
+  "edi_file": "sample-data/edi/unsupported-unit.edi",
+  "expectation": {
+    "workflow_status": "MANUAL_REVIEW",
+    "policy_decision": "MANUAL_REVIEW",
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

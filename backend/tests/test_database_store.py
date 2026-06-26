@@ -3,7 +3,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 
 from app.domain.models import IngestRequest, WorkflowRecord, WorkflowStatus, new_id
-from app.services.database import DatabaseWorkflowStore
+from app.services.database import AuditEventRow, DatabaseWorkflowStore, WorkflowRow
 from app.services.mock_erp import MockERPAdapter
 from app.services.policies import PolicyConfigRepository
 from app.services.profiles import TradingPartnerProfileRepository
@@ -35,6 +35,14 @@ def test_database_store_persists_workflow_and_audit():
     loaded = store.get_workflow(workflow.workflow_id)
     assert loaded.workflow_id == workflow.workflow_id
     assert loaded.audit_events[0].event_type == "TEST_EVENT"
+
+    with store.session_factory() as session:
+        row = session.get(WorkflowRow, workflow.workflow_id)
+        audit_rows = session.query(AuditEventRow).filter_by(workflow_id=workflow.workflow_id).all()
+        assert row is not None
+        assert row.data["audit_events"] == []
+        assert len(audit_rows) == 1
+        assert audit_rows[0].event_type == "TEST_EVENT"
 
 
 def test_database_store_persists_idempotency_and_erp_update_keys():

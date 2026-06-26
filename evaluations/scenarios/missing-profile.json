@@ -1,0 +1,13 @@
+{
+  "scenario_id": "missing-profile",
+  "name": "Missing trading partner profile",
+  "description": "An otherwise parseable EDI file from an unconfigured supplier should route to manual review.",
+  "edi_file": "sample-data/edi/missing-profile.edi",
+  "expectation": {
+    "workflow_status": "MANUAL_REVIEW",
+    "policy_decision": null,
+    "validation_status": "MANUAL_REVIEW_REQUIRED",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

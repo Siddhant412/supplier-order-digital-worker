@@ -1,0 +1,13 @@
+{
+  "scenario_id": "unknown-part",
+  "name": "Unknown supplier part",
+  "description": "A supplier part without a buyer part or alias mapping should route to manual review.",
+  "edi_file": "sample-data/edi/unknown-part.edi",
+  "expectation": {
+    "workflow_status": "MANUAL_REVIEW",
+    "policy_decision": "MANUAL_REVIEW",
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

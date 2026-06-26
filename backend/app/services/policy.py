@@ -35,6 +35,15 @@ class PolicyEngine:
                 reasons=reasons,
             )
 
+        manual_review_results = [result for result in comparisons if result.match_status == "manual_review"]
+        if manual_review_results:
+            return PolicyDecision(
+                decision=PolicyDecisionType.MANUAL_REVIEW,
+                policy_version=self.config.policy_version,
+                policy_id=self.config.policy_id,
+                reasons=["Comparison contains unresolved part, unit, or line matching ambiguity."],
+            )
+
         all_differences = [difference for result in comparisons for difference in result.differences]
         if not all_differences:
             if self.config.exact_match_auto_approve:
@@ -62,7 +71,7 @@ class PolicyEngine:
                 reasons.append(
                     f"Delivery delay exceeds {self.config.maximum_delivery_delay_days}-day threshold."
                 )
-            if difference.field in {"part_number", "unit"}:
+            if difference.field in {"part_number", "unit", "currency"}:
                 reasons.append(f"{difference.field} change requires approval.")
 
         confirmed_order_value = sum(line.quantity * line.unit_price for line in confirmation.lines)

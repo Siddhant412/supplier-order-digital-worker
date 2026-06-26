@@ -1,0 +1,14 @@
+{
+  "scenario_id": "duplicate-ack",
+  "name": "Duplicate acknowledgment",
+  "description": "Replaying the same supplier acknowledgment should not execute a second ERP update.",
+  "edi_file": "sample-data/edi/duplicate-ack.edi",
+  "repeat_input_count": 2,
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": null,
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": true
+  }
+}

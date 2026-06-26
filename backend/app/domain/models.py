@@ -34,10 +34,12 @@ class WorkflowStatus(str, Enum):
     AUTO_APPROVED = "AUTO_APPROVED"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     APPROVED = "APPROVED"
+    CLARIFICATION_REQUESTED = "CLARIFICATION_REQUESTED"
     REJECTED = "REJECTED"
     ERP_UPDATED = "ERP_UPDATED"
     SUPPLIER_NOTIFIED = "SUPPLIER_NOTIFIED"
     COMPLETED = "COMPLETED"
+    RETRY_PENDING = "RETRY_PENDING"
     MANUAL_REVIEW = "MANUAL_REVIEW"
     DEAD_LETTER = "DEAD_LETTER"
     FAILED = "FAILED"
@@ -112,6 +114,9 @@ class SupplierConfirmationLine(BaseModel):
     quantity: int
     unit: str
     unit_price: float
+    normalized_quantity: int | None = None
+    normalized_unit: str | None = None
+    normalized_unit_price: float | None = None
     promised_date: date
     status: str
     warnings: list[str] = Field(default_factory=list)
@@ -157,6 +162,9 @@ class Supplier(BaseModel):
     name: str
     email: str
     part_aliases: dict[str, str] = Field(default_factory=dict)
+    unit_conversions: dict[str, float] = Field(default_factory=dict)
+    automation_enabled: bool = True
+    escalation_email: str | None = None
 
 
 class InventoryPosition(BaseModel):
@@ -242,7 +250,20 @@ class SupplierResponse(BaseModel):
     status: Literal["queued", "sent", "failed"] = "queued"
 
 
+class OperatorBrief(BaseModel):
+    workflow_id: str
+    summary: str
+    risk_assessment: str
+    recommended_action: str
+    supplier_message_draft: str
+    source: Literal["deterministic", "llm"]
+    model: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class AuditEvent(BaseModel):
+    event_id: str = Field(default_factory=lambda: new_id("AUD"))
     workflow_id: str
     event_type: str
     occurred_at: datetime = Field(default_factory=utc_now)
@@ -259,6 +280,7 @@ class WorkflowRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     raw_payload_hash: str
+    raw_payload: str | None = None
     idempotency_key: str | None = None
     duplicate_of: str | None = None
     parse_result: EDIParseResult | None = None
@@ -268,8 +290,10 @@ class WorkflowRecord(BaseModel):
     impacts: list[ImpactAssessment] = Field(default_factory=list)
     policy_decision: PolicyDecision | None = None
     approval: ApprovalRecord | None = None
+    approval_history: list[ApprovalRecord] = Field(default_factory=list)
     erp_update_command: ERPUpdateCommand | None = None
     supplier_response: SupplierResponse | None = None
+    operator_brief: OperatorBrief | None = None
     audit_events: list[AuditEvent] = Field(default_factory=list)
 
 
@@ -280,6 +304,8 @@ class IngestRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     approved_by: str = "operator@procureops.local"
     comments: str = ""
+    supplier_response_subject: str | None = None
+    supplier_response_body: str | None = None
 
 
 class ProfileCreateRequest(BaseModel):
@@ -324,6 +350,9 @@ class EvaluationExpectation(BaseModel):
     erp_update_executed: bool
     duplicate_of_existing: bool = False
     profile_id_contains: str | None = None
+    notification_status: str | None = None
+    notification_retry_executed: bool | None = None
+    erp_lookup_retry_executed: bool | None = None
 
 
 class EvaluationScenario(BaseModel):
@@ -331,6 +360,10 @@ class EvaluationScenario(BaseModel):
     name: str
     description: str = ""
     edi_file: str
+    simulate_erp_lookup_failure_once: bool = False
+    simulate_notification_failure_once: bool = False
+    retry_notification_after_failure: bool = False
+    repeat_input_count: int = 1
     expectation: EvaluationExpectation
 
 

@@ -1,0 +1,14 @@
+{
+  "scenario_id": "repeated-ack",
+  "name": "Repeated ACK split quantities",
+  "description": "Repeated line-level ACK segments are interpreted as split quantities according to the published profile.",
+  "edi_file": "sample-data/edi/repeated-ack.edi",
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID_WITH_WARNINGS",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false,
+    "notification_status": "sent"
+  }
+}

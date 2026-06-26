@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.services.database import DatabasePolicyConfigRepository, DatabaseTradingPartnerProfileRepository, DatabaseWorkflowStore
 from app.services.evaluations import EvaluationRunner
+from app.services.briefing import BriefingService
 from app.services.mock_erp import MockERPAdapter
 from app.services.policies import PolicyConfigRepository
 from app.services.profiles import TradingPartnerProfileRepository
@@ -52,6 +53,11 @@ erp = MockERPAdapter()
 profiles = create_profiles()
 policies = create_policies()
 workflow_engine = WorkflowEngine(store=store, erp=erp, profiles=profiles, policies=policies)
+briefing_service = BriefingService(
+    api_key=os.getenv("OPENAI_API_KEY") or None,
+    model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+    timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
+)
 project_root = find_project_root()
 evaluation_runner = EvaluationRunner(
     store=store,

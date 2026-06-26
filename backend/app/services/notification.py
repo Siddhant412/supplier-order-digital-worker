@@ -3,7 +3,15 @@ from __future__ import annotations
 from app.domain.models import Supplier, SupplierConfirmation, SupplierResponse, WorkflowRecord
 
 
+class TransientNotificationError(RuntimeError):
+    pass
+
+
 class NotificationService:
+    def __init__(self, fail_once_control_numbers: set[str] | None = None) -> None:
+        self.fail_once_control_numbers = fail_once_control_numbers or set()
+        self._failed_control_numbers: set[str] = set()
+
     def build_supplier_response(
         self,
         workflow: WorkflowRecord,
@@ -26,3 +34,55 @@ class NotificationService:
             body=body,
             status="sent",
         )
+
+    def build_rejection_response(
+        self,
+        workflow: WorkflowRecord,
+        supplier: Supplier,
+        confirmation: SupplierConfirmation,
+        comments: str = "",
+    ) -> SupplierResponse:
+        reason_text = comments or "The submitted changes cannot be accepted under the current purchasing policy."
+        body = (
+            f"Thank you for confirming purchase order {confirmation.purchase_order_number}. "
+            f"We cannot accept the proposed changes at this time. {reason_text}"
+        )
+        return SupplierResponse(
+            workflow_id=workflow.workflow_id,
+            recipient=supplier.email,
+            subject=f"Purchase Order {confirmation.purchase_order_number} changes not accepted",
+            body=body,
+            status="sent",
+        )
+
+    def build_clarification_response(
+        self,
+        workflow: WorkflowRecord,
+        supplier: Supplier,
+        confirmation: SupplierConfirmation,
+        comments: str = "",
+    ) -> SupplierResponse:
+        request_text = comments or "Please confirm the updated quantity, price, delivery date, and any partial shipment plan."
+        body = (
+            f"Thank you for confirming purchase order {confirmation.purchase_order_number}. "
+            f"We need clarification before the acknowledgment can be accepted. {request_text}"
+        )
+        return SupplierResponse(
+            workflow_id=workflow.workflow_id,
+            recipient=supplier.email,
+            subject=f"Clarification needed for purchase order {confirmation.purchase_order_number}",
+            body=body,
+            status="sent",
+        )
+
+    def send_supplier_response(self, workflow: WorkflowRecord, response: SupplierResponse) -> SupplierResponse:
+        control_number = workflow.confirmation.source_control_number if workflow.confirmation else None
+        if (
+            control_number
+            and control_number in self.fail_once_control_numbers
+            and control_number not in self._failed_control_numbers
+        ):
+            self._failed_control_numbers.add(control_number)
+            raise TransientNotificationError(f"Temporary notification outage for control {control_number}.")
+        response.status = "sent"
+        return response

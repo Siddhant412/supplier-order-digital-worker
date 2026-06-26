@@ -1,0 +1,13 @@
+{
+  "scenario_id": "malformed-input",
+  "name": "Malformed EDI input",
+  "description": "A payload that does not start with an X12 ISA envelope should be rejected into dead letter.",
+  "edi_file": "sample-data/edi/malformed.edi",
+  "expectation": {
+    "workflow_status": "DEAD_LETTER",
+    "policy_decision": null,
+    "validation_status": "REJECTED",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

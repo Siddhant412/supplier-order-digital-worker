@@ -4,10 +4,15 @@ from copy import deepcopy
 from datetime import date
 
 from app.domain.models import DemandForecast, InventoryPosition, PurchaseOrder, PurchaseOrderLine, Supplier
+from app.services.erp import TransientERPError
 
 
 class MockERPAdapter:
-    def __init__(self) -> None:
+    def __init__(self, transient_lookup_failures: dict[str, int] | None = None) -> None:
+        self.transient_lookup_failures = transient_lookup_failures or {}
+        self.reset()
+
+    def reset(self) -> None:
         self.purchase_orders: dict[str, PurchaseOrder] = {
             "PO-1042": PurchaseOrder(
                 purchase_order_number="PO-1042",
@@ -38,6 +43,8 @@ class MockERPAdapter:
                 name="Acme Components",
                 email="orders@acme.example",
                 part_aliases={"ACME-M100": "MOTOR-100", "ACME-S22": "SENSOR-22"},
+                unit_conversions={"MOTOR-100:CA:EA": 10},
+                escalation_email="procurement-leads@example.local",
             )
         }
         self.inventory: dict[str, InventoryPosition] = {
@@ -50,6 +57,10 @@ class MockERPAdapter:
         }
 
     def get_purchase_order(self, po_number: str) -> PurchaseOrder:
+        remaining_failures = self.transient_lookup_failures.get(po_number, 0)
+        if remaining_failures > 0:
+            self.transient_lookup_failures[po_number] = remaining_failures - 1
+            raise TransientERPError(f"Temporary ERP lookup outage for {po_number}.")
         return deepcopy(self.purchase_orders[po_number])
 
     def get_supplier(self, supplier_id: str) -> Supplier:

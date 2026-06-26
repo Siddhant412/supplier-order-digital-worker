@@ -1,0 +1,16 @@
+{
+  "scenario_id": "erp-lookup-retry",
+  "name": "Temporary ERP lookup outage",
+  "description": "A transient purchase-order lookup failure should be retried and the safe workflow should still complete.",
+  "edi_file": "sample-data/edi/erp-lookup-retry.edi",
+  "simulate_erp_lookup_failure_once": true,
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false,
+    "notification_status": "sent",
+    "erp_lookup_retry_executed": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "scenario_id": "part-substitution",
+  "name": "Part substitution",
+  "description": "A supplier substitutes a different known part, so the change requires human approval.",
+  "edi_file": "sample-data/edi/part-substitution.edi",
+  "expectation": {
+    "workflow_status": "AWAITING_APPROVAL",
+    "policy_decision": "REQUIRE_APPROVAL",
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

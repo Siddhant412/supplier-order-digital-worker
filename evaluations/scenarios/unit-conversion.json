@@ -1,0 +1,14 @@
+{
+  "scenario_id": "unit-conversion",
+  "name": "Supported unit conversion",
+  "description": "A supplier acknowledges MOTOR-100 in cases, which converts deterministically to eaches before comparison and ERP update.",
+  "edi_file": "sample-data/edi/unit-conversion.edi",
+  "expectation": {
+    "workflow_status": "COMPLETED",
+    "policy_decision": "AUTO_APPROVE",
+    "validation_status": "VALID",
+    "erp_update_executed": true,
+    "duplicate_of_existing": false,
+    "notification_status": "sent"
+  }
+}

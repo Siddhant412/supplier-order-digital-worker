@@ -30,10 +30,12 @@ class ImpactAssessmentService:
             delay_days = max((confirmed.promised_date - po_line.requested_date).days, 0)
             delayed_demand = delay_days * demand.daily_demand
             shortage = max(delayed_demand - inventory.on_hand, 0)
-            quantity_reduction = max(po_line.quantity - confirmed.quantity, 0)
+            effective_quantity = confirmed.normalized_quantity or confirmed.quantity
+            effective_unit_price = confirmed.normalized_unit_price or confirmed.unit_price
+            quantity_reduction = max(po_line.quantity - effective_quantity, 0)
             if quantity_reduction:
                 shortage += quantity_reduction
-            financial_variance = round((confirmed.unit_price - po_line.unit_price) * confirmed.quantity, 2)
+            financial_variance = round((effective_unit_price - po_line.unit_price) * effective_quantity, 2)
             stockout_risk = shortage > 0
             recommendation = "Accept automatically; no material operational impact detected."
             if stockout_risk:

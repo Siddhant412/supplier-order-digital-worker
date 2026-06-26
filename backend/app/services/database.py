@@ -50,6 +50,19 @@ class WorkflowRow(Base):
     data: Mapped[dict] = mapped_column(json_column())
 
 
+class AuditEventRow(Base):
+    __tablename__ = "audit_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_type: Mapped[str] = mapped_column(String(128), index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(64), index=True)
+    actor_type: Mapped[str] = mapped_column(String(32), index=True)
+    summary: Mapped[str] = mapped_column(String(1024))
+    metadata_json: Mapped[dict] = mapped_column(json_column())
+
+
 class IdempotencyKeyRow(Base):
     __tablename__ = "idempotency_keys"
 
@@ -131,7 +144,7 @@ class DatabaseWorkflowStore:
         workflow.updated_at = utc_now()
         with self.session_factory() as session:
             row = session.get(WorkflowRow, workflow.workflow_id)
-            payload = workflow.model_dump(mode="json")
+            payload = self._workflow_payload(workflow)
             if row is None:
                 row = WorkflowRow(
                     workflow_id=workflow.workflow_id,
@@ -158,17 +171,19 @@ class DatabaseWorkflowStore:
             row = session.get(WorkflowRow, workflow_id)
             if row is None:
                 raise KeyError(workflow_id)
-            return WorkflowRecord.model_validate(row.data)
+            return self._workflow_from_row(session, row)
 
     def list_workflows(self) -> list[WorkflowRecord]:
         with self.session_factory() as session:
             rows = session.scalars(select(WorkflowRow).order_by(WorkflowRow.created_at.desc())).all()
-            return [WorkflowRecord.model_validate(row.data) for row in rows]
+            return [self._workflow_from_row(session, row) for row in rows]
 
     def index_idempotency_key(self, key: str, workflow_id: str) -> None:
         with self.session_factory() as session:
             existing = session.get(IdempotencyKeyRow, key)
             if existing is not None:
+                existing.workflow_id = workflow_id
+                session.commit()
                 return
             session.add(IdempotencyKeyRow(key=key, workflow_id=workflow_id))
             try:
@@ -248,12 +263,61 @@ class DatabaseWorkflowStore:
             metadata=metadata or {},
         )
         workflow.audit_events.append(event)
+        with self.session_factory() as session:
+            for audit_event in workflow.audit_events:
+                if session.get(AuditEventRow, audit_event.event_id) is None:
+                    session.add(self._row_from_audit_event(audit_event))
+            session.commit()
         self.save_workflow(workflow)
         return event
 
     def set_status(self, workflow: WorkflowRecord, status: WorkflowStatus, summary: str) -> None:
         workflow.status = status
         self.add_audit(workflow, f"WORKFLOW_{status.value}", summary)
+
+    def _workflow_payload(self, workflow: WorkflowRecord) -> dict:
+        payload = workflow.model_dump(mode="json")
+        payload["audit_events"] = []
+        return payload
+
+    def _workflow_from_row(self, session: Session, row: WorkflowRow) -> WorkflowRecord:
+        workflow = WorkflowRecord.model_validate(row.data)
+        audit_events = self._audit_events_for_workflow(session, workflow.workflow_id)
+        if audit_events:
+            workflow.audit_events = audit_events
+        return workflow
+
+    def _audit_events_for_workflow(self, session: Session, workflow_id: str) -> list[AuditEvent]:
+        rows = session.scalars(
+            select(AuditEventRow)
+            .where(AuditEventRow.workflow_id == workflow_id)
+            .order_by(AuditEventRow.occurred_at.asc(), AuditEventRow.event_id.asc())
+        ).all()
+        return [
+            AuditEvent(
+                event_id=row.event_id,
+                workflow_id=row.workflow_id,
+                event_type=row.event_type,
+                occurred_at=row.occurred_at,
+                correlation_id=row.correlation_id,
+                actor_type=row.actor_type,  # type: ignore[arg-type]
+                summary=row.summary,
+                metadata=row.metadata_json,
+            )
+            for row in rows
+        ]
+
+    def _row_from_audit_event(self, event: AuditEvent) -> AuditEventRow:
+        return AuditEventRow(
+            event_id=event.event_id,
+            workflow_id=event.workflow_id,
+            event_type=event.event_type,
+            occurred_at=event.occurred_at,
+            correlation_id=event.correlation_id,
+            actor_type=event.actor_type,
+            summary=event.summary[:1024],
+            metadata_json=event.metadata,
+        )
 
 
 class DatabaseTradingPartnerProfileRepository:

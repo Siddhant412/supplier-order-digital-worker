@@ -1,0 +1,13 @@
+{
+  "scenario_id": "unknown-ack-code",
+  "name": "Unknown acknowledgment code",
+  "description": "An ACK code not present in the published profile should route the workflow to manual review.",
+  "edi_file": "sample-data/edi/unknown-ack-code.edi",
+  "expectation": {
+    "workflow_status": "MANUAL_REVIEW",
+    "policy_decision": null,
+    "validation_status": "MANUAL_REVIEW_REQUIRED",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

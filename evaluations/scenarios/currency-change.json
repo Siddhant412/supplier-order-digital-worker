@@ -1,0 +1,13 @@
+{
+  "scenario_id": "currency-change",
+  "name": "Currency change",
+  "description": "A supplier acknowledgment in a different currency must require approval before any ERP mutation.",
+  "edi_file": "sample-data/edi/currency-change.edi",
+  "expectation": {
+    "workflow_status": "AWAITING_APPROVAL",
+    "policy_decision": "REQUIRE_APPROVAL",
+    "validation_status": "VALID",
+    "erp_update_executed": false,
+    "duplicate_of_existing": false
+  }
+}

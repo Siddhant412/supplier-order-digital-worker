@@ -54,6 +54,7 @@ class EDIInterpreter:
             purchase_order_number=parse_result.purchase_order_number or "UNKNOWN",
             supplier_id=parse_result.supplier_id or "UNKNOWN",
             confirmation_status=confirmation_status,
+            currency=self._currency(parse_result),
             lines=lines,
             warnings=warnings,
             errors=errors,
@@ -75,26 +76,42 @@ class EDIInterpreter:
             errors.append("Repeated ACK segments require manual review for this partner.")
             return None, warnings, errors
 
-        ack = ack_segments[0]
-        status_code = self._safe(ack, 1)
-        canonical_status = profile.ack_codes.get(status_code or "")
-        if canonical_status is None:
-            errors.append(f"Unknown ACK code: {status_code}.")
+        canonical_statuses: list[str] = []
+        quantities: list[int] = []
+        units: list[str] = []
+        dates: list[date] = []
+        for ack in ack_segments:
+            status_code = self._safe(ack, 1)
+            canonical_status = profile.ack_codes.get(status_code or "")
+            if canonical_status is None:
+                errors.append(f"Unknown ACK code: {status_code}.")
+            else:
+                canonical_statuses.append(canonical_status)
 
-        quantity = self._int(self._safe(ack, 2), "ACK quantity", errors)
-        unit = self._safe(ack, 3, self._safe(po1, 3, "EA"))
-        date_qualifier = self._safe(ack, 4)
-        date_field = profile.date_qualifiers.get(date_qualifier or "")
-        if date_field != "promised_delivery_date":
-            errors.append(f"Unsupported or ambiguous date qualifier: {date_qualifier}.")
-        promised_date = self._date(self._safe(ack, 5), "ACK date", errors)
+            quantity = self._int(self._safe(ack, 2), "ACK quantity", errors)
+            if quantity is not None:
+                quantities.append(quantity)
+            units.append(self._safe(ack, 3, self._safe(po1, 3, "EA")))
+            date_qualifier = self._safe(ack, 4)
+            date_field = profile.date_qualifiers.get(date_qualifier or "")
+            if date_field != "promised_delivery_date":
+                errors.append(f"Unsupported or ambiguous date qualifier: {date_qualifier}.")
+            promised_date = self._date(self._safe(ack, 5), "ACK date", errors)
+            if promised_date is not None:
+                dates.append(promised_date)
 
         supplier_part, internal_part = self._part_numbers(po1)
         if len(ack_segments) > 1:
-            warnings.append("Using first ACK segment for v1 canonical mapping; repeated segments remain visible in audit data.")
+            warnings.append("Repeated ACK segments interpreted as split quantities by the published profile.")
+        if len(set(units)) > 1:
+            errors.append("Repeated ACK segments use conflicting units.")
 
-        if quantity is None or promised_date is None or canonical_status is None:
+        if not quantities or not dates or not canonical_statuses:
             return None, warnings, errors
+        quantity = sum(quantities)
+        unit = units[0]
+        promised_date = max(dates)
+        canonical_status = "accepted" if set(canonical_statuses) == {"accepted"} else "accepted_with_changes"
 
         return (
             SupplierConfirmationLine(
@@ -130,10 +147,17 @@ class EDIInterpreter:
             purchase_order_number=parse_result.purchase_order_number or "UNKNOWN",
             supplier_id=parse_result.supplier_id or "UNKNOWN",
             confirmation_status=status,
+            currency=self._currency(parse_result),
             lines=[],
             warnings=warnings,
             errors=errors,
         )
+
+    def _currency(self, parse_result: EDIParseResult) -> str:
+        for segment in parse_result.header_segments:
+            if segment.tag == "CUR":
+                return self._safe(segment, 2, "USD")
+        return "USD"
 
     def _validation_status(self, errors: list[str], warnings: list[str]) -> ValidationStatus:
         if errors:
