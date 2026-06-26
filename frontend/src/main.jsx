@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   FileText,
   FlaskConical,
+  GitBranch,
   HelpCircle,
   Plus,
   RefreshCw,
@@ -39,6 +40,8 @@ function App() {
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState("needs_attention");
   const [workflowQuery, setWorkflowQuery] = useState("");
   const [workflowSort, setWorkflowSort] = useState("priority");
+  const [executionTrace, setExecutionTrace] = useState([]);
+  const [traceLoading, setTraceLoading] = useState(false);
   const [metrics, setMetrics] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -356,6 +359,35 @@ function App() {
     refresh().catch((err) => setError(err.message));
   }, []);
 
+  useEffect(() => {
+    if (!selected?.workflow_id) {
+      setExecutionTrace([]);
+      return;
+    }
+    let cancelled = false;
+    setTraceLoading(true);
+    fetchJson(`/api/workflows/${selected.workflow_id}/execution-trace`)
+      .then((trace) => {
+        if (!cancelled) {
+          setExecutionTrace(trace);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+          setExecutionTrace([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTraceLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.workflow_id, selected?.updated_at]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -431,6 +463,9 @@ function App() {
           <Metric label="Retry pending" value={metrics?.retry_pending ?? 0} />
           <Metric label="Dead letter" value={metrics?.dead_letter ?? 0} />
           <Metric label="Failed notifications" value={metrics?.failed_notifications ?? 0} />
+          <Metric label="Retry recovery rate" value={formatRate(metrics?.retry_recovery_rate)} />
+          <Metric label="LLM fallback rate" value={formatRate(metrics?.llm_fallback_rate)} />
+          <Metric label="Avg duration" value={formatSeconds(metrics?.average_workflow_duration_seconds)} />
           <Metric label="False autonomous action rate" value={`${metrics?.false_autonomous_action_rate ?? 0}`} />
         </section>
       </aside>
@@ -457,6 +492,8 @@ function App() {
         {selected ? (
           <WorkflowDetail
             workflow={selected}
+            executionTrace={executionTrace}
+            traceLoading={traceLoading}
             onApprove={(payload) => submitWorkflowDecision("approve", payload)}
             onReject={(payload) => submitWorkflowDecision("reject", payload)}
             onClarify={(payload) => submitWorkflowDecision("request-clarification", payload)}
@@ -502,6 +539,8 @@ function App() {
 
 function WorkflowDetail({
   workflow,
+  executionTrace,
+  traceLoading,
   onApprove,
   onReject,
   onClarify,
@@ -695,6 +734,8 @@ function WorkflowDetail({
         )}
       </section>
 
+      <ExecutionTracePanel trace={executionTrace} loading={traceLoading} />
+
       <section className="panel">
         <div className="panel-title">
           <span>Operator Brief</span>
@@ -843,6 +884,45 @@ function WorkflowDetail({
           {filteredAuditEvents.length === 0 && <p className="muted">No audit events match the current filters.</p>}
         </div>
       </section>
+    </section>
+  );
+}
+
+function ExecutionTracePanel({ trace, loading }) {
+  return (
+    <section className="panel trace-panel">
+      <div className="panel-title">
+        <span>Digital Worker Execution Trace</span>
+        <GitBranch size={16} />
+      </div>
+      {loading ? (
+        <p className="muted">Loading execution trace.</p>
+      ) : trace.length === 0 ? (
+        <p className="muted">No execution trace available.</p>
+      ) : (
+        <div className="execution-trace">
+          {trace.map((step) => (
+            <div className={`trace-step ${step.status}`} key={step.step_id}>
+              <div className="trace-marker">
+                <span />
+              </div>
+              <div className="trace-content">
+                <div className="trace-step-header">
+                  <strong>{step.label}</strong>
+                  <StatusBadge status={step.status} />
+                </div>
+                <span>{step.summary}</span>
+                <div className="trace-meta">
+                  <small>{step.owner}</small>
+                  <small>{step.langgraph_node ? `LangGraph: ${step.langgraph_node}` : "Outside graph"}</small>
+                  <small>{step.event_type ?? "No event"}</small>
+                  <small>{step.occurred_at ? new Date(step.occurred_at).toLocaleString() : "-"}</small>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -1056,12 +1136,15 @@ function StatusBadge({ status }) {
   const tone =
     status === "COMPLETED" || status === "PUBLISHED"
       || status === "PASSED"
+      || status === "completed"
       ? "success"
       : status === "AWAITING_APPROVAL" || status === "DRAFT" || status === "CLARIFICATION_REQUESTED" || status === "RETRY_PENDING"
         || status === "MANUAL_REVIEW" || status === "DEAD_LETTER"
         || status === "STOCKOUT_RISK" || status === "manual_review" || status === "unmatched"
-        || status === "FAILED"
+        || status === "FAILED" || status === "waiting" || status === "blocked"
         ? "warning"
+        : status === "REJECTED" || status === "failed"
+          ? "danger"
         : "neutral";
   return <span className={`status-badge ${tone}`}>{status}</span>;
 }
@@ -1605,6 +1688,16 @@ function formatValue(value) {
   if (value === null || value === undefined) return "-";
   if (typeof value === "object") return JSON.stringify(value);
   return value;
+}
+
+function formatRate(value) {
+  if (value === null || value === undefined) return "0%";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatSeconds(value) {
+  if (!value) return "0s";
+  return `${Math.round(value)}s`;
 }
 
 createRoot(document.getElementById("root")).render(<App />);

@@ -39,6 +39,41 @@ def test_api_ingests_risky_workflow_and_approval_resumes_execution():
     assert approved["erp_update_command"] is not None
 
 
+def test_api_exposes_workflow_execution_trace():
+    client = TestClient(app)
+    client.post("/api/mock-erp/reset")
+
+    edi_text = unique_control(load_sample("risky-change.edi"), "0002", "0122")
+    ingest_response = client.post("/api/ingest", json={"edi_text": edi_text})
+    workflow = ingest_response.json()
+
+    trace_response = client.get(f"/api/workflows/{workflow['workflow_id']}/execution-trace")
+
+    assert trace_response.status_code == 200
+    trace = trace_response.json()
+    steps_by_id = {step["step_id"]: step for step in trace}
+    assert steps_by_id["parse"]["langgraph_node"] == "parse_edi_syntax"
+    assert steps_by_id["interpret"]["langgraph_node"] == "interpret_edi_semantics"
+    assert steps_by_id["approval"]["owner"] == "human"
+    assert steps_by_id["approval"]["status"] == "waiting"
+    assert steps_by_id["erp_update"]["status"] == "waiting"
+    assert steps_by_id["notify"]["status"] == "skipped"
+
+    approve_response = client.post(
+        f"/api/workflows/{workflow['workflow_id']}/approve",
+        json={"approved_by": "operator@procureops.local", "comments": "Approved for trace test."},
+    )
+    assert approve_response.status_code == 200
+
+    completed_trace = client.get(f"/api/workflows/{workflow['workflow_id']}/execution-trace").json()
+    completed_by_id = {step["step_id"]: step for step in completed_trace}
+    assert completed_by_id["approval"]["status"] == "completed"
+    assert completed_by_id["erp_update"]["status"] == "completed"
+    assert completed_by_id["notify"]["status"] == "completed"
+    assert completed_by_id["complete"]["status"] == "completed"
+    client.post("/api/mock-erp/reset")
+
+
 def test_api_requests_clarification_with_edited_supplier_response():
     client = TestClient(app)
 
@@ -172,6 +207,28 @@ def test_api_resets_mock_erp_seed_state():
     assert reset_response.status_code == 200
     assert reset_response.json()["status"] == "reset"
     assert reset_po["lines"][0]["quantity"] == 500
+
+
+def test_api_exposes_liveness_readiness_and_metrics():
+    client = TestClient(app)
+
+    live_response = client.get("/live")
+    ready_response = client.get("/ready")
+    metrics_response = client.get("/api/metrics")
+    prometheus_response = client.get("/metrics")
+
+    assert live_response.status_code == 200
+    assert live_response.json()["status"] == "ok"
+    assert ready_response.status_code == 200
+    assert ready_response.json()["ready"] is True
+    metrics = metrics_response.json()
+    assert metrics_response.status_code == 200
+    assert "average_workflow_duration_seconds" in metrics
+    assert "retry_recovery_rate" in metrics
+    assert "llm_fallback_rate" in metrics
+    assert prometheus_response.status_code == 200
+    assert "procureops_total_workflows" in prometheus_response.text
+    assert "procureops_llm_fallback_rate" in prometheus_response.text
 
 
 def test_api_updates_and_publishes_profile_draft():

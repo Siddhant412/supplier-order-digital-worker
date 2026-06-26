@@ -43,7 +43,10 @@ Then open:
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
-- API health check: http://localhost:8000/health
+- API liveness check: http://localhost:8000/live
+- API readiness check: http://localhost:8000/ready
+- JSON metrics: http://localhost:8000/api/metrics
+- Metrics exporter: http://localhost:8000/metrics
 
 Run backend tests:
 
@@ -60,6 +63,12 @@ GitHub Actions runs on pull requests, pushes to `main`, and manual dispatch. The
 - backend tests with Python 3.12
 - frontend production build with Node 20
 - Docker image builds for the API and frontend
+
+## Observability
+
+The backend emits structured JSON logs for HTTP requests and workflow audit events. The operations console and API expose workflow metrics including automation rate, manual-review rate, retry recovery, LLM fallback rate, failed notifications, and average workflow duration.
+
+Workflow detail pages also include a digital worker execution trace backed by `GET /api/workflows/{workflow_id}/execution-trace`. The trace maps audit events into LangGraph-oriented steps such as EDI parsing, semantic interpretation, PO retrieval, policy evaluation, human approval, ERP update, supplier notification, and completion.
 
 Optional operator-brief generation uses deterministic fallback by default. To enable model-generated briefs, set:
 

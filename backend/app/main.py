@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
+from time import perf_counter
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import briefing_service, erp, evaluation_runner, policies, profiles, store, workflow_engine
 from app.domain.models import (
     ApprovalRequest,
     EvaluationRun,
+    ExecutionTraceStep,
     IngestRequest,
     OperatorBrief,
     PolicyConfig,
@@ -17,7 +22,12 @@ from app.domain.models import (
     TradingPartnerProfile,
     WorkflowRecord,
 )
+from app.services.execution_trace import build_execution_trace
+from app.services.observability import compute_metrics, configure_json_logging, log_event, metrics_to_prometheus
 
+
+configure_json_logging()
+logger = logging.getLogger("procureops.api")
 
 app = FastAPI(title="ProcureOps AI API", version="0.1.0")
 
@@ -30,9 +40,72 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((perf_counter() - started) * 1000, 2)
+        log_event(
+            logger,
+            logging.ERROR,
+            "request_failed",
+            method=request.method,
+            path=request.url.path,
+            duration_ms=duration_ms,
+        )
+        raise
+    duration_ms = round((perf_counter() - started) * 1000, 2)
+    log_event(
+        logger,
+        logging.INFO,
+        "request_completed",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )
+    return response
+
+
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "store": store.__class__.__name__}
+def health() -> dict[str, object]:
+    readiness = readiness_status()
+    return {"status": "ok" if readiness["ready"] else "degraded", "store": store.__class__.__name__, **readiness}
+
+
+@app.get("/live")
+def live() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> dict[str, object]:
+    readiness = readiness_status()
+    if not readiness["ready"]:
+        raise HTTPException(status_code=503, detail=readiness)
+    return readiness
+
+
+def readiness_status() -> dict[str, object]:
+    checks: dict[str, bool] = {}
+    try:
+        store.list_workflows()
+        checks["store"] = True
+    except Exception:
+        checks["store"] = False
+    try:
+        profiles.list()
+        checks["profiles"] = True
+    except Exception:
+        checks["profiles"] = False
+    try:
+        policies.get_active()
+        checks["policies"] = True
+    except Exception:
+        checks["policies"] = False
+    return {"ready": all(checks.values()), "checks": checks}
 
 
 @app.post("/api/ingest", response_model=WorkflowRecord)
@@ -54,6 +127,15 @@ def get_workflow(workflow_id: str) -> WorkflowRecord:
         return store.get_workflow(workflow_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found.") from exc
+
+
+@app.get("/api/workflows/{workflow_id}/execution-trace", response_model=list[ExecutionTraceStep])
+def get_workflow_execution_trace(workflow_id: str) -> list[ExecutionTraceStep]:
+    try:
+        workflow = store.get_workflow(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found.") from exc
+    return build_execution_trace(workflow)
 
 
 @app.post("/api/workflows/{workflow_id}/approve", response_model=WorkflowRecord)
@@ -108,7 +190,7 @@ def generate_operator_brief(workflow_id: str) -> OperatorBrief:
         workflow,
         "OPERATOR_BRIEF_GENERATED",
         "Operator brief generated from workflow facts.",
-        {"source": brief.source, "model": brief.model},
+        {"source": brief.source, "model": brief.model, "metadata": brief.metadata},
     )
     return brief
 
@@ -234,37 +316,9 @@ def get_evaluation_run(run_id: str) -> EvaluationRun:
 
 @app.get("/api/metrics")
 def metrics() -> dict:
-    workflows = store.list_workflows()
-    total = len(workflows)
-    auto_completed = [
-        workflow
-        for workflow in workflows
-        if workflow.policy_decision and workflow.policy_decision.decision == "AUTO_APPROVE"
-    ]
-    awaiting = [workflow for workflow in workflows if workflow.status == "AWAITING_APPROVAL"]
-    manual = [workflow for workflow in workflows if workflow.status == "MANUAL_REVIEW"]
-    completed = [workflow for workflow in workflows if workflow.status == "COMPLETED"]
-    retry_pending = [workflow for workflow in workflows if workflow.status == "RETRY_PENDING"]
-    dead_letter = [workflow for workflow in workflows if workflow.status == "DEAD_LETTER"]
-    rejected = [workflow for workflow in workflows if workflow.status == "REJECTED"]
-    clarification = [workflow for workflow in workflows if workflow.status == "CLARIFICATION_REQUESTED"]
-    failed_notifications = [
-        workflow for workflow in workflows if workflow.supplier_response and workflow.supplier_response.status == "failed"
-    ]
-    workflows_with_approval = [workflow for workflow in workflows if workflow.approval_history]
-    return {
-        "total_workflows": total,
-        "completed": len(completed),
-        "automatic_processing_rate": (len(auto_completed) / total) if total else 0,
-        "human_review_rate": ((len(awaiting) + len(manual) + len(clarification)) / total) if total else 0,
-        "awaiting_approval": len(awaiting),
-        "manual_review": len(manual),
-        "retry_pending": len(retry_pending),
-        "dead_letter": len(dead_letter),
-        "rejected": len(rejected),
-        "clarification_requested": len(clarification),
-        "failed_notifications": len(failed_notifications),
-        "approval_action_count": sum(len(workflow.approval_history) for workflow in workflows),
-        "workflows_with_approval_rate": (len(workflows_with_approval) / total) if total else 0,
-        "false_autonomous_action_rate": 0,
-    }
+    return compute_metrics(store.list_workflows())
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def prometheus_metrics() -> str:
+    return metrics_to_prometheus(compute_metrics(store.list_workflows()))

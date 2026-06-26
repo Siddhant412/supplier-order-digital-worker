@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 
@@ -25,8 +26,12 @@ from app.domain.models import (
     new_id,
     utc_now,
 )
+from app.services.observability import log_event
 from app.services.profiles import seed_profile
 from app.services.policies import seed_policy
+
+
+logger = logging.getLogger("procureops.audit")
 
 
 class Base(DeclarativeBase):
@@ -268,6 +273,16 @@ class DatabaseWorkflowStore:
                 if session.get(AuditEventRow, audit_event.event_id) is None:
                     session.add(self._row_from_audit_event(audit_event))
             session.commit()
+        log_event(
+            logger,
+            logging.INFO,
+            "audit_event_recorded",
+            workflow_id=event.workflow_id,
+            event_id=event.event_id,
+            event_type=event.event_type,
+            actor_type=event.actor_type,
+            correlation_id=event.correlation_id,
+        )
         self.save_workflow(workflow)
         return event
 

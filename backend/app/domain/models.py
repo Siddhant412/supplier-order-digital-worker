@@ -273,6 +273,18 @@ class AuditEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExecutionTraceStep(BaseModel):
+    step_id: str
+    label: str
+    langgraph_node: str | None = None
+    owner: Literal["deterministic", "llm", "human", "system"]
+    status: Literal["completed", "waiting", "blocked", "failed", "skipped"]
+    event_type: str | None = None
+    summary: str
+    occurred_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkflowRecord(BaseModel):
     workflow_id: str
     correlation_id: str

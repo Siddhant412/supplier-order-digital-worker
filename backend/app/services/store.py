@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from app.domain.models import AuditEvent, EvaluationRun, WorkflowRecord, WorkflowStatus, utc_now
+from app.services.observability import log_event
+
+
+logger = logging.getLogger("procureops.audit")
 
 
 class WorkflowStore(Protocol):
@@ -94,6 +99,16 @@ class InMemoryStore:
             metadata=metadata or {},
         )
         workflow.audit_events.append(event)
+        log_event(
+            logger,
+            logging.INFO,
+            "audit_event_recorded",
+            workflow_id=event.workflow_id,
+            event_id=event.event_id,
+            event_type=event.event_type,
+            actor_type=event.actor_type,
+            correlation_id=event.correlation_id,
+        )
         self.save_workflow(workflow)
         return event
 
