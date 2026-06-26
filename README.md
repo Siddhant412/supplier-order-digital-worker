@@ -53,6 +53,14 @@ PYTHONPATH=backend pytest -q backend/tests
 
 Docker Compose runs the backend with PostgreSQL persistence enabled through `DATABASE_URL`. If `DATABASE_URL` is not set, the backend falls back to an in-memory store for isolated local tests.
 
+## CI
+
+GitHub Actions runs on pull requests, pushes to `main`, and manual dispatch. The workflow checks:
+
+- backend tests with Python 3.12
+- frontend production build with Node 20
+- Docker image builds for the API and frontend
+
 Optional operator-brief generation uses deterministic fallback by default. To enable model-generated briefs, set:
 
 ```bash
