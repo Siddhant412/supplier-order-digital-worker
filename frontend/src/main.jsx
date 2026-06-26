@@ -736,6 +736,8 @@ function WorkflowDetail({
 
       <ExecutionTracePanel trace={executionTrace} loading={traceLoading} />
 
+      <RiskInvestigationPanel investigation={workflow.risk_investigation} />
+
       <section className="panel">
         <div className="panel-title">
           <span>Operator Brief</span>
@@ -884,6 +886,56 @@ function WorkflowDetail({
           {filteredAuditEvents.length === 0 && <p className="muted">No audit events match the current filters.</p>}
         </div>
       </section>
+    </section>
+  );
+}
+
+function RiskInvestigationPanel({ investigation }) {
+  return (
+    <section className="panel">
+      <div className="panel-title">Risk Investigation</div>
+      {investigation ? (
+        <div className="investigation-panel">
+          <div className="brief-field">
+            <strong>Recommendation</strong>
+            <span>{investigation.recommendation}</span>
+          </div>
+          <div className="brief-field">
+            <strong>Observations</strong>
+            <ul className="compact-list">
+              {investigation.observations.map((observation, index) => (
+                <li key={`${observation}-${index}`}>{observation}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="tool-call-list">
+            {investigation.tool_requests.map((request, index) => (
+              <details className="tool-call" key={`${request.tool}-${index}`}>
+                <summary>
+                  <strong>{request.tool}</strong>
+                  <span>{request.reason}</span>
+                </summary>
+                <pre>
+                  {JSON.stringify(
+                    {
+                      arguments: request.arguments,
+                      result: investigation.tool_results[index]?.result ?? null,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
+            ))}
+          </div>
+          <small className="muted">
+            Source: {investigation.source}
+            {investigation.model ? ` / ${investigation.model}` : ""}
+          </small>
+        </div>
+      ) : (
+        <p className="muted">No bounded investigation was needed for this workflow.</p>
+      )}
     </section>
   );
 }

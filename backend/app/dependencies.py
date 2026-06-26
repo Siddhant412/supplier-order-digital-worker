@@ -52,7 +52,16 @@ store = create_store()
 erp = MockERPAdapter()
 profiles = create_profiles()
 policies = create_policies()
-workflow_engine = WorkflowEngine(store=store, erp=erp, profiles=profiles, policies=policies)
+workflow_engine = WorkflowEngine(
+    store=store,
+    erp=erp,
+    profiles=profiles,
+    policies=policies,
+    investigation_api_key=os.getenv("OPENAI_API_KEY") or None,
+    investigation_model=os.getenv("OPENAI_INVESTIGATION_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
+    investigation_timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
+    enable_llm_investigation=os.getenv("ENABLE_LLM_INVESTIGATION", "false").lower() == "true",
+)
 briefing_service = BriefingService(
     api_key=os.getenv("OPENAI_API_KEY") or None,
     model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),

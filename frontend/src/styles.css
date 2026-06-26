@@ -583,6 +583,55 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.investigation-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.compact-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: #4c5a6e;
+  line-height: 1.4;
+}
+
+.tool-call-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tool-call {
+  border: 1px solid #d7dde6;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fbfcfe;
+}
+
+.tool-call summary {
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.tool-call summary span {
+  color: #657286;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.tool-call pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid #d7dde6;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 11px;
+}
+
 .trace-panel {
   align-content: start;
 }

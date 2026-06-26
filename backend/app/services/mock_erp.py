@@ -55,6 +55,34 @@ class MockERPAdapter:
             "MOTOR-100": DemandForecast(part_number="MOTOR-100", daily_demand=10),
             "SENSOR-22": DemandForecast(part_number="SENSOR-22", daily_demand=5),
         }
+        self.supplier_performance: dict[str, dict] = {
+            "SUP-100": {
+                "on_time_delivery_rate": 0.93,
+                "quality_escape_rate": 0.01,
+                "average_acknowledgment_response_hours": 6,
+                "recent_exception_count": 2,
+            }
+        }
+        self.alternate_suppliers: dict[str, list[dict]] = {
+            "MOTOR-100": [
+                {
+                    "supplier_id": "SUP-220",
+                    "supplier_name": "Northline Motion",
+                    "available_quantity": 120,
+                    "lead_time_days": 4,
+                    "unit_price": 12.80,
+                }
+            ],
+            "SENSOR-22": [
+                {
+                    "supplier_id": "SUP-330",
+                    "supplier_name": "Vector Sensing",
+                    "available_quantity": 75,
+                    "lead_time_days": 6,
+                    "unit_price": 8.95,
+                }
+            ],
+        }
 
     def get_purchase_order(self, po_number: str) -> PurchaseOrder:
         remaining_failures = self.transient_lookup_failures.get(po_number, 0)
@@ -71,6 +99,37 @@ class MockERPAdapter:
 
     def get_demand(self, part_number: str) -> DemandForecast:
         return self.demand.get(part_number, DemandForecast(part_number=part_number, daily_demand=0))
+
+    def search_purchase_orders(self, supplier_id: str | None = None, part_number: str | None = None) -> list[PurchaseOrder]:
+        purchase_orders = list(self.purchase_orders.values())
+        if supplier_id:
+            purchase_orders = [po for po in purchase_orders if po.supplier_id == supplier_id]
+        if part_number:
+            purchase_orders = [
+                po
+                for po in purchase_orders
+                if any(line.part_number == part_number for line in po.lines)
+            ]
+        return deepcopy(purchase_orders)
+
+    def get_supplier_performance(self, supplier_id: str) -> dict:
+        return deepcopy(
+            self.supplier_performance.get(
+                supplier_id,
+                {
+                    "on_time_delivery_rate": None,
+                    "quality_escape_rate": None,
+                    "average_acknowledgment_response_hours": None,
+                    "recent_exception_count": None,
+                },
+            )
+        )
+
+    def get_alternate_suppliers(self, part_number: str, required_quantity: int = 0) -> list[dict]:
+        suppliers = deepcopy(self.alternate_suppliers.get(part_number, []))
+        if required_quantity:
+            return [supplier for supplier in suppliers if supplier["available_quantity"] >= required_quantity]
+        return suppliers
 
     def update_purchase_order_lines(self, po_number: str, line_updates: list[dict]) -> dict:
         before = self.get_purchase_order(po_number)

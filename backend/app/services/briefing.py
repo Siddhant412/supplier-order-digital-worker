@@ -141,6 +141,7 @@ class BriefingService:
             "comparisons": [comparison.model_dump(mode="json") for comparison in workflow.comparisons],
             "impacts": [impact.model_dump(mode="json") for impact in workflow.impacts],
             "policy_decision": workflow.policy_decision.model_dump(mode="json") if workflow.policy_decision else None,
+            "risk_investigation": workflow.risk_investigation.model_dump(mode="json") if workflow.risk_investigation else None,
             "approval_history": [approval.model_dump(mode="json") for approval in workflow.approval_history],
             "supplier_response": workflow.supplier_response.model_dump(mode="json") if workflow.supplier_response else None,
             "latest_audit_events": [event.model_dump(mode="json") for event in workflow.audit_events[-8:]],

@@ -54,6 +54,8 @@ def test_api_exposes_workflow_execution_trace():
     steps_by_id = {step["step_id"]: step for step in trace}
     assert steps_by_id["parse"]["langgraph_node"] == "parse_edi_syntax"
     assert steps_by_id["interpret"]["langgraph_node"] == "interpret_edi_semantics"
+    assert steps_by_id["investigate"]["langgraph_node"] == "investigate_risk"
+    assert steps_by_id["investigate"]["status"] == "completed"
     assert steps_by_id["approval"]["owner"] == "human"
     assert steps_by_id["approval"]["status"] == "waiting"
     assert steps_by_id["erp_update"]["status"] == "waiting"

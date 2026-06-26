@@ -15,6 +15,7 @@ from app.domain.models import (
     ERPUpdateCommand,
     IngestRequest,
     PolicyDecisionType,
+    RiskInvestigation,
     Supplier,
     SupplierResponse,
     ValidationStatus,
@@ -27,6 +28,7 @@ from app.services.edi_interpreter import EDIInterpreter
 from app.services.edi_parser import EDIParser
 from app.services.erp import ERPAdapter, TransientERPError
 from app.services.impact import ImpactAssessmentService
+from app.services.investigation import BoundedInvestigationAgent
 from app.services.notification import NotificationService, TransientNotificationError
 from app.services.policy import PolicyEngine
 from app.services.policies import PolicyConfigStore
@@ -49,6 +51,10 @@ class WorkflowEngine:
         profiles: TradingPartnerProfileStore,
         policies: PolicyConfigStore,
         notifications: NotificationService | None = None,
+        investigation_api_key: str | None = None,
+        investigation_model: str = "gpt-5.4-mini",
+        investigation_timeout_seconds: float = 20.0,
+        enable_llm_investigation: bool = False,
     ) -> None:
         self.store = store
         self.erp = erp
@@ -56,6 +62,14 @@ class WorkflowEngine:
         self.interpreter = EDIInterpreter(profiles)
         self.comparison = ComparisonEngine()
         self.impact = ImpactAssessmentService(erp)
+        self.investigation = BoundedInvestigationAgent(
+            erp,
+            profiles,
+            api_key=investigation_api_key,
+            model=investigation_model,
+            timeout_seconds=investigation_timeout_seconds,
+            enable_llm_planning=enable_llm_investigation,
+        )
         self.policies = policies
         self.notifications = notifications or NotificationService()
         self.graph = self._build_graph()
@@ -212,6 +226,7 @@ class WorkflowEngine:
         graph.add_node("compare_lines", self._compare_lines)
         graph.add_node("assess_impact", self._assess_impact)
         graph.add_node("evaluate_policy", self._evaluate_policy)
+        graph.add_node("investigate_risk", self._investigate_risk)
         graph.add_node("wait_for_approval", self._wait_for_approval)
         graph.add_node("apply_erp_update", self._apply_erp_update)
         graph.add_node("notify_supplier", self._notify_supplier)
@@ -230,8 +245,9 @@ class WorkflowEngine:
         graph.add_conditional_edges(
             "evaluate_policy",
             self._route_after_policy,
-            {"auto": "apply_erp_update", "approval": "wait_for_approval", "manual_review": END, "reject": END},
+            {"auto": "apply_erp_update", "approval": "investigate_risk", "manual_review": END, "reject": END},
         )
+        graph.add_edge("investigate_risk", "wait_for_approval")
         graph.add_edge("wait_for_approval", END)
         graph.add_edge("apply_erp_update", "notify_supplier")
         graph.add_edge("notify_supplier", "complete")
@@ -256,6 +272,7 @@ class WorkflowEngine:
             self._notify_supplier(state)
             self._complete(state)
         elif route == "approval":
+            self._investigate_risk(state)
             self._wait_for_approval(state)
 
     def _parse_edi_syntax(self, state: WorkflowState) -> WorkflowState:
@@ -403,6 +420,20 @@ class WorkflowEngine:
         workflow.status = WorkflowStatus.MANUAL_REVIEW
         self.store.save_workflow(workflow)
         return "manual_review"
+
+    def _investigate_risk(self, state: WorkflowState) -> WorkflowState:
+        workflow = self.store.get_workflow(state["workflow_id"])
+        investigation = self.investigation.investigate(workflow)
+        if investigation is None:
+            return state
+        workflow.risk_investigation = investigation
+        self.store.add_audit(
+            workflow,
+            "RISK_INVESTIGATION_COMPLETED",
+            "Bounded investigation agent gathered read-only context for human review.",
+            self._investigation_metadata(investigation),
+        )
+        return state
 
     def _wait_for_approval(self, state: WorkflowState) -> WorkflowState:
         workflow = self.store.get_workflow(state["workflow_id"])
@@ -596,3 +627,13 @@ class WorkflowEngine:
                     )
                     raise
         raise RuntimeError("ERP lookup retry loop exited unexpectedly.")
+
+    def _investigation_metadata(self, investigation: RiskInvestigation) -> dict:
+        return {
+            "source": investigation.source,
+            "model": investigation.model,
+            "observation_count": len(investigation.observations),
+            "tool_request_count": len(investigation.tool_requests),
+            "tools": [request.tool for request in investigation.tool_requests],
+            "recommendation": investigation.recommendation,
+        }

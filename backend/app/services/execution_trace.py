@@ -40,6 +40,13 @@ TRACE_DEFINITIONS = (
     TraceDefinition("impact", "Assess inventory impact", "assess_impact", "deterministic", ("IMPACT_ASSESSED",)),
     TraceDefinition("policy", "Evaluate policy guardrails", "evaluate_policy", "deterministic", ("POLICY_DECISION_RECORDED",)),
     TraceDefinition(
+        "investigate",
+        "Bounded risk investigation",
+        "investigate_risk",
+        "deterministic",
+        ("RISK_INVESTIGATION_COMPLETED",),
+    ),
+    TraceDefinition(
         "approval",
         "Human approval gate",
         "wait_for_approval",
@@ -122,10 +129,12 @@ def _latest_event(event_types: tuple[str, ...], events_by_type: dict[str, list[A
 
 
 def _owner(definition: TraceDefinition, event: AuditEvent | None) -> TraceOwner:
-    if definition.step_id == "brief" and event:
+    if definition.step_id in {"brief", "investigate"} and event:
         source = event.metadata.get("source")
         if source == "deterministic":
             return "deterministic"
+        if source == "llm":
+            return "llm"
     return definition.owner
 
 
@@ -210,6 +219,8 @@ def _summary(
             return "Policy requires human approval before ERP mutation."
     if definition.step_id == "erp_update" and status == "waiting":
         return "ERP update is paused until the approval gate is resolved."
+    if definition.step_id == "investigate":
+        return "Risk investigation was not needed for this workflow path."
     if definition.step_id == "brief":
         return "Optional operator brief has not been generated for this workflow."
     if status == "blocked":

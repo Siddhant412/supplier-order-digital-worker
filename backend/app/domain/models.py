@@ -250,6 +250,38 @@ class SupplierResponse(BaseModel):
     status: Literal["queued", "sent", "failed"] = "queued"
 
 
+class ReadOnlyToolRequest(BaseModel):
+    tool: Literal[
+        "get_purchase_order",
+        "search_purchase_orders",
+        "get_inventory_by_site",
+        "get_open_demand",
+        "get_supplier_performance",
+        "get_part_aliases",
+        "get_alternate_suppliers",
+        "get_partner_profile",
+    ]
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+
+
+class ReadOnlyToolResult(BaseModel):
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: Any
+
+
+class RiskInvestigation(BaseModel):
+    workflow_id: str
+    observations: list[str] = Field(default_factory=list)
+    tool_requests: list[ReadOnlyToolRequest] = Field(default_factory=list)
+    tool_results: list[ReadOnlyToolResult] = Field(default_factory=list)
+    recommendation: str
+    source: Literal["deterministic", "llm"] = "deterministic"
+    model: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class OperatorBrief(BaseModel):
     workflow_id: str
     summary: str
@@ -301,6 +333,7 @@ class WorkflowRecord(BaseModel):
     comparisons: list[LineComparisonResult] = Field(default_factory=list)
     impacts: list[ImpactAssessment] = Field(default_factory=list)
     policy_decision: PolicyDecision | None = None
+    risk_investigation: RiskInvestigation | None = None
     approval: ApprovalRecord | None = None
     approval_history: list[ApprovalRecord] = Field(default_factory=list)
     erp_update_command: ERPUpdateCommand | None = None

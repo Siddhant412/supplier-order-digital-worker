@@ -14,7 +14,8 @@ This repository contains the first working vertical slice:
 4. Compare line-level quantities, prices, units, dates, and part identities.
 5. Assess inventory and shortage impact.
 6. Apply configurable approval policies.
-7. Route exceptions through approve, reject, clarification, and manual-review resolution decisions.
+7. Run a bounded read-only risk investigation for approval-required cases.
+8. Route exceptions through approve, reject, clarification, and manual-review resolution decisions.
 8. Edit supplier-facing response content before human approval actions are recorded.
 9. Generate supplier communication and write an auditable event timeline backed by append-only audit event records.
 10. Handle deterministic unit conversion, currency changes, repeated ACK interpretation, unknown parts, and part substitutions.
@@ -68,14 +69,18 @@ GitHub Actions runs on pull requests, pushes to `main`, and manual dispatch. The
 
 The backend emits structured JSON logs for HTTP requests and workflow audit events. The operations console and API expose workflow metrics including automation rate, manual-review rate, retry recovery, LLM fallback rate, failed notifications, and average workflow duration.
 
-Workflow detail pages also include a digital worker execution trace backed by `GET /api/workflows/{workflow_id}/execution-trace`. The trace maps audit events into LangGraph-oriented steps such as EDI parsing, semantic interpretation, PO retrieval, policy evaluation, human approval, ERP update, supplier notification, and completion.
+Workflow detail pages also include a digital worker execution trace backed by `GET /api/workflows/{workflow_id}/execution-trace`. The trace maps audit events into LangGraph-oriented steps such as EDI parsing, semantic interpretation, PO retrieval, policy evaluation, bounded risk investigation, human approval, ERP update, supplier notification, and completion.
+
+The bounded investigation agent is intentionally read-only. It can gather context such as inventory, demand, supplier performance, part aliases, alternate suppliers, purchase-order history, and trading-partner profile details, then produce a structured recommendation for the operator. It cannot approve, reject, or update ERP records. Planning is deterministic by default, with optional LLM planning available behind the same typed allowlist.
 
 Optional operator-brief generation uses deterministic fallback by default. To enable model-generated briefs, set:
 
 ```bash
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=gpt-5.4-mini
+export OPENAI_INVESTIGATION_MODEL=gpt-5.4-mini
 export OPENAI_TIMEOUT_SECONDS=20
+export ENABLE_LLM_INVESTIGATION=true
 ```
 
 ## Principles

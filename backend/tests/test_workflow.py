@@ -51,6 +51,17 @@ def test_risky_change_waits_for_approval_then_completes():
     assert workflow.status == WorkflowStatus.AWAITING_APPROVAL
     assert workflow.policy_decision is not None
     assert workflow.policy_decision.decision == "REQUIRE_APPROVAL"
+    assert workflow.risk_investigation is not None
+    assert workflow.risk_investigation.observations
+    assert workflow.risk_investigation.tool_requests
+    assert {request.tool for request in workflow.risk_investigation.tool_requests} >= {
+        "get_inventory_by_site",
+        "get_open_demand",
+        "get_alternate_suppliers",
+        "get_partner_profile",
+    }
+    assert workflow.risk_investigation.tool_results
+    assert "ERP" not in workflow.risk_investigation.recommendation.upper()
     assert workflow.erp_update_command is None
 
     approved = engine.approve(workflow.workflow_id, ApprovalRequest(comments="Approved for test."))
