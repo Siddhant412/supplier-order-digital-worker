@@ -91,3 +91,25 @@ def test_briefing_service_falls_back_on_malformed_llm_json():
 
     assert brief.source == "deterministic"
     assert brief.metadata["fallback_reason"] == "ValueError"
+
+
+def test_briefing_service_rejects_premature_approval_supplier_draft():
+    engine = WorkflowEngine(InMemoryStore(), MockERPAdapter(), TradingPartnerProfileRepository(), PolicyConfigRepository())
+    workflow = engine.start(IngestRequest(edi_text=load_sample("risky-change.edi")))
+    fake_client = FakeClient(
+        """
+        {
+          "summary": "Summary text.",
+          "risk_assessment": "Risk text.",
+          "recommended_action": "Action text.",
+          "supplier_message_draft": "Thank you. The approved confirmation has been recorded."
+        }
+        """
+    )
+
+    brief = BriefingService(api_key="test-key", client_factory=lambda api_key, timeout: fake_client).generate(workflow)
+
+    assert brief.source == "deterministic"
+    assert "approved confirmation has been recorded" not in brief.supplier_message_draft.lower()
+    assert "quantity" in brief.supplier_message_draft
+    assert brief.metadata["fallback_reason"] == "ValueError"

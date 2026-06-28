@@ -60,6 +60,7 @@ TRACE_DEFINITIONS = (
             "MANUAL_REVIEW_CLARIFICATION_REQUESTED",
         ),
     ),
+    TraceDefinition("brief", "Generate operator brief", None, "llm", ("OPERATOR_BRIEF_GENERATED",)),
     TraceDefinition(
         "erp_update",
         "Apply ERP update",
@@ -74,7 +75,6 @@ TRACE_DEFINITIONS = (
         "deterministic",
         ("SUPPLIER_NOTIFIED", "SUPPLIER_NOTIFICATION_FAILED", "SUPPLIER_NOTIFICATION_RETRY_STARTED"),
     ),
-    TraceDefinition("brief", "Generate operator brief", None, "llm", ("OPERATOR_BRIEF_GENERATED",)),
     TraceDefinition("complete", "Complete workflow", "complete", "system", ("WORKFLOW_COMPLETED",)),
 )
 

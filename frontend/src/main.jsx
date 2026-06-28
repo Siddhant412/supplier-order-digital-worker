@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardCheck,
+  Database,
   FileText,
   FlaskConical,
   GitBranch,
@@ -14,6 +15,7 @@ import {
   Save,
   Search,
   Send,
+  SlidersHorizontal,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -34,12 +36,18 @@ function App() {
   const [profiles, setProfiles] = useState([]);
   const [policies, setPolicies] = useState([]);
   const [evaluationRuns, setEvaluationRuns] = useState([]);
+  const [erpContext, setErpContext] = useState(null);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
   const [selectedPolicyId, setSelectedPolicyId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState("needs_attention");
   const [workflowQuery, setWorkflowQuery] = useState("");
   const [workflowSort, setWorkflowSort] = useState("priority");
+  const [activeView, setActiveView] = useState("operations");
+  const [ediViewMode, setEdiViewMode] = useState("structured");
+  const [ediPreview, setEdiPreview] = useState(null);
+  const [ediPreviewLoading, setEdiPreviewLoading] = useState(false);
+  const [ediPreviewError, setEdiPreviewError] = useState("");
   const [executionTrace, setExecutionTrace] = useState([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [metrics, setMetrics] = useState(null);
@@ -85,19 +93,58 @@ function App() {
     return response.json();
   }
 
+  useEffect(() => {
+    const trimmed = ediText.trim();
+    if (!trimmed) {
+      setEdiPreview(null);
+      setEdiPreviewError("");
+      setEdiPreviewLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setEdiPreviewLoading(true);
+      setEdiPreviewError("");
+      try {
+        const preview = await fetchJson("/api/edi/preview", {
+          method: "POST",
+          body: JSON.stringify({ edi_text: trimmed }),
+        });
+        if (!cancelled) {
+          setEdiPreview(preview);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setEdiPreview(null);
+          setEdiPreviewError(err.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setEdiPreviewLoading(false);
+        }
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [ediText]);
+
   async function refresh() {
-    const [workflowData, metricData, profileData, policyData, evaluationData] = await Promise.all([
+    const [workflowData, metricData, profileData, policyData, evaluationData, erpData] = await Promise.all([
       fetchJson("/api/workflows"),
       fetchJson("/api/metrics"),
       fetchJson("/api/profiles"),
       fetchJson("/api/policies"),
       fetchJson("/api/evaluations/runs"),
+      fetchJson("/api/mock-erp/context"),
     ]);
     setWorkflows(workflowData);
     setMetrics(metricData);
     setProfiles(profileData);
     setPolicies(policyData);
     setEvaluationRuns(evaluationData);
+    setErpContext(erpData);
     if (!selectedProfileId && profileData.length > 0) {
       setSelectedProfileId(profileData[0].profile_id);
     }
@@ -110,6 +157,7 @@ function App() {
   async function ingest() {
     setBusy(true);
     setError("");
+    setActiveView("operations");
     try {
       const workflow = await fetchJson("/api/ingest", {
         method: "POST",
@@ -122,6 +170,11 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function loadEdiSample(sampleKey) {
+    setEdiText(samples[sampleKey] ?? samples.risky);
+    setActiveView("operations");
   }
 
   async function submitWorkflowDecision(endpoint, payload) {
@@ -179,6 +232,7 @@ function App() {
   async function saveProfile(profileId, payload) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const profile = await fetchJson(`/api/profiles/${encodeURIComponent(profileId)}`, {
         method: "PATCH",
@@ -196,6 +250,7 @@ function App() {
   async function createProfile(payload) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const profile = await fetchJson("/api/profiles", {
         method: "POST",
@@ -213,6 +268,7 @@ function App() {
   async function publishProfile(profileId) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const profile = await fetchJson(`/api/profiles/${encodeURIComponent(profileId)}/publish`, {
         method: "POST",
@@ -229,6 +285,7 @@ function App() {
   async function archiveProfile(profileId) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const profile = await fetchJson(`/api/profiles/${encodeURIComponent(profileId)}/archive`, {
         method: "POST",
@@ -245,6 +302,7 @@ function App() {
   async function savePolicy(policyId, payload) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const policy = await fetchJson(`/api/policies/${encodeURIComponent(policyId)}`, {
         method: "PATCH",
@@ -262,6 +320,7 @@ function App() {
   async function createPolicy(payload) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const policy = await fetchJson("/api/policies", {
         method: "POST",
@@ -279,6 +338,7 @@ function App() {
   async function publishPolicy(policyId) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const policy = await fetchJson(`/api/policies/${encodeURIComponent(policyId)}/publish`, {
         method: "POST",
@@ -295,6 +355,7 @@ function App() {
   async function archivePolicy(policyId) {
     setBusy(true);
     setError("");
+    setActiveView("configuration");
     try {
       const policy = await fetchJson(`/api/policies/${encodeURIComponent(policyId)}/archive`, {
         method: "POST",
@@ -311,6 +372,7 @@ function App() {
   async function runEvaluations() {
     setBusy(true);
     setError("");
+    setActiveView("evaluations");
     try {
       await fetchJson("/api/evaluations/run", {
         method: "POST",
@@ -471,69 +533,268 @@ function App() {
       </aside>
 
       <section className="workspace">
-        <section className="panel ingest-panel">
-          <div className="panel-title">EDI Intake</div>
-          <div className="sample-row">
-            <button onClick={() => setEdiText(samples.exact)}>Exact match</button>
-            <button onClick={() => setEdiText(samples.smallDelay)}>Small delay</button>
-            <button onClick={() => setEdiText(samples.risky)}>Risky change</button>
-            <button onClick={() => setEdiText(samples.qualifier)}>Unsupported qualifier</button>
-          </div>
-          <textarea value={ediText} onChange={(event) => setEdiText(event.target.value)} />
-          <div className="action-row">
-            <button className="primary-button" onClick={ingest} disabled={busy}>
-              <Upload size={16} />
-              Ingest EDI
-            </button>
-            {error && <span className="error-text">{error}</span>}
-          </div>
-        </section>
+        <div className="workspace-tabs" role="tablist" aria-label="Workspace sections">
+          <button
+            className={activeView === "operations" ? "active" : ""}
+            onClick={() => setActiveView("operations")}
+            role="tab"
+            aria-selected={activeView === "operations"}
+          >
+            <ClipboardCheck size={16} />
+            Operations
+          </button>
+          <button
+            className={activeView === "mockErp" ? "active" : ""}
+            onClick={() => setActiveView("mockErp")}
+            role="tab"
+            aria-selected={activeView === "mockErp"}
+          >
+            <Database size={16} />
+            Mock ERP
+          </button>
+          <button
+            className={activeView === "configuration" ? "active" : ""}
+            onClick={() => setActiveView("configuration")}
+            role="tab"
+            aria-selected={activeView === "configuration"}
+          >
+            <SlidersHorizontal size={16} />
+            Configuration
+          </button>
+          <button
+            className={activeView === "evaluations" ? "active" : ""}
+            onClick={() => setActiveView("evaluations")}
+            role="tab"
+            aria-selected={activeView === "evaluations"}
+          >
+            <FlaskConical size={16} />
+            Evaluations
+          </button>
+        </div>
 
-        {selected ? (
-          <WorkflowDetail
-            workflow={selected}
-            executionTrace={executionTrace}
-            traceLoading={traceLoading}
-            onApprove={(payload) => submitWorkflowDecision("approve", payload)}
-            onReject={(payload) => submitWorkflowDecision("reject", payload)}
-            onClarify={(payload) => submitWorkflowDecision("request-clarification", payload)}
-            onRetryNotification={retryNotification}
-            onGenerateBrief={generateBrief}
-            onReprocess={reprocessWorkflow}
-            busy={busy}
-          />
-        ) : (
-          <section className="empty-state">
-            <Send size={28} />
-            <span>Ingest an EDI confirmation to start a governed workflow.</span>
-          </section>
+        {error && <div className="global-error">{error}</div>}
+
+        {activeView === "operations" && (
+          <>
+            <EDIIntakePanel
+              ediText={ediText}
+              onEdiTextChange={setEdiText}
+              viewMode={ediViewMode}
+              onViewModeChange={setEdiViewMode}
+              preview={ediPreview}
+              previewLoading={ediPreviewLoading}
+              previewError={ediPreviewError}
+              onIngest={ingest}
+              busy={busy}
+            />
+
+            {selected ? (
+              <WorkflowDetail
+                workflow={selected}
+                executionTrace={executionTrace}
+                traceLoading={traceLoading}
+                onApprove={(payload) => submitWorkflowDecision("approve", payload)}
+                onReject={(payload) => submitWorkflowDecision("reject", payload)}
+                onClarify={(payload) => submitWorkflowDecision("request-clarification", payload)}
+                onRetryNotification={retryNotification}
+                onGenerateBrief={generateBrief}
+                onReprocess={reprocessWorkflow}
+                busy={busy}
+              />
+            ) : (
+              <section className="empty-state">
+                <Send size={28} />
+                <span>Ingest an EDI confirmation to start a governed workflow.</span>
+              </section>
+            )}
+          </>
         )}
 
-        <ProfileManager
-          profiles={profiles}
-          selectedProfile={selectedProfile}
-          onSelect={setSelectedProfileId}
-          onCreate={createProfile}
-          onSave={saveProfile}
-          onPublish={publishProfile}
-          onArchive={archiveProfile}
-          busy={busy}
-        />
+        {activeView === "mockErp" && (
+          <MockErpDashboard context={erpContext} onLoadSample={loadEdiSample} />
+        )}
 
-        <PolicyManager
-          policies={policies}
-          selectedPolicy={selectedPolicy}
-          onSelect={setSelectedPolicyId}
-          onCreate={createPolicy}
-          onSave={savePolicy}
-          onPublish={publishPolicy}
-          onArchive={archivePolicy}
-          busy={busy}
-        />
+        {activeView === "configuration" && (
+          <>
+            <ProfileManager
+              profiles={profiles}
+              selectedProfile={selectedProfile}
+              onSelect={setSelectedProfileId}
+              onCreate={createProfile}
+              onSave={saveProfile}
+              onPublish={publishProfile}
+              onArchive={archiveProfile}
+              busy={busy}
+            />
 
-        <EvaluationDashboard runs={evaluationRuns} onRun={runEvaluations} onResetMockErp={resetMockErp} busy={busy} />
+            <PolicyManager
+              policies={policies}
+              selectedPolicy={selectedPolicy}
+              onSelect={setSelectedPolicyId}
+              onCreate={createPolicy}
+              onSave={savePolicy}
+              onPublish={publishPolicy}
+              onArchive={archivePolicy}
+              busy={busy}
+            />
+          </>
+        )}
+
+        {activeView === "evaluations" && (
+          <EvaluationDashboard runs={evaluationRuns} onRun={runEvaluations} onResetMockErp={resetMockErp} busy={busy} />
+        )}
       </section>
     </main>
+  );
+}
+
+function EDIIntakePanel({
+  ediText,
+  onEdiTextChange,
+  viewMode,
+  onViewModeChange,
+  preview,
+  previewLoading,
+  previewError,
+  onIngest,
+  busy,
+}) {
+  const summary = preview?.summary;
+  const parseResult = preview?.parse_result;
+  const confirmation = preview?.confirmation;
+  const findings = [
+    ...(parseResult?.errors ?? []).map((message) => ({ kind: "Parse error", message })),
+    ...(confirmation?.errors ?? []).map((message) => ({ kind: "Semantic error", message })),
+    ...(parseResult?.warnings ?? []).map((message) => ({ kind: "Parse warning", message })),
+    ...(confirmation?.warnings ?? []).map((message) => ({ kind: "Semantic warning", message })),
+  ];
+
+  return (
+    <section className="panel ingest-panel">
+      <div className="panel-title">EDI Intake</div>
+      <div className="sample-row">
+        <button onClick={() => onEdiTextChange(samples.exact)}>Exact match</button>
+        <button onClick={() => onEdiTextChange(samples.smallDelay)}>Small delay</button>
+        <button onClick={() => onEdiTextChange(samples.risky)}>Risky change</button>
+        <button onClick={() => onEdiTextChange(samples.qualifier)}>Unsupported qualifier</button>
+      </div>
+
+      <div className="intake-toolbar">
+        <div className="segmented-control" role="tablist" aria-label="EDI intake view">
+          <button
+            className={viewMode === "structured" ? "active" : ""}
+            onClick={() => onViewModeChange("structured")}
+            role="tab"
+            aria-selected={viewMode === "structured"}
+          >
+            Structured view
+          </button>
+          <button
+            className={viewMode === "raw" ? "active" : ""}
+            onClick={() => onViewModeChange("raw")}
+            role="tab"
+            aria-selected={viewMode === "raw"}
+          >
+            Raw EDI
+          </button>
+        </div>
+        <small>{previewLoading ? "Refreshing preview..." : "Preview generated from current EDI text."}</small>
+      </div>
+
+      {viewMode === "structured" ? (
+        <EDIStructuredPreview
+          summary={summary}
+          confirmation={confirmation}
+          parseResult={parseResult}
+          findings={findings}
+          previewError={previewError}
+          previewLoading={previewLoading}
+        />
+      ) : (
+        <textarea value={ediText} onChange={(event) => onEdiTextChange(event.target.value)} aria-label="Raw EDI payload" />
+      )}
+
+      <div className="action-row">
+        <button className="primary-button" onClick={onIngest} disabled={busy || !ediText.trim()}>
+          <Upload size={16} />
+          Ingest EDI
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function EDIStructuredPreview({ summary, confirmation, parseResult, findings, previewError, previewLoading }) {
+  if (previewError) {
+    return (
+      <div className="preview-empty error-text">
+        Preview unavailable: {previewError}
+      </div>
+    );
+  }
+  if (!summary || !confirmation || !parseResult) {
+    return <div className="preview-empty">{previewLoading ? "Generating preview." : "No EDI preview available."}</div>;
+  }
+
+  return (
+    <div className="edi-preview">
+      <div className="preview-header">
+        <div>
+          <strong>Inbound X12 855 Acknowledgment</strong>
+          <span>Readable preview of the current intake payload.</span>
+        </div>
+        <StatusBadge status={summary.validation_status} />
+      </div>
+
+      <div className="summary-grid preview-summary">
+        <Metric label="Purchase order" value={summary.purchase_order_number} />
+        <Metric label="Supplier" value={summary.supplier_id} />
+        <Metric label="Control" value={summary.control_number} />
+        <Metric label="EDI version" value={summary.edi_version} />
+        <Metric label="Transaction" value={summary.transaction_type} />
+        <Metric label="Lines" value={summary.line_count} />
+      </div>
+
+      {findings.length > 0 && (
+        <div className="preview-findings">
+          {findings.map((finding, index) => (
+            <div className="finding-chip" key={`${finding.kind}-${finding.message}-${index}`}>
+              <strong>{finding.kind}</strong>
+              <span>{finding.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmation.lines.length > 0 ? (
+        <div className="edi-line-grid">
+          {confirmation.lines.map((line) => (
+            <div className="edi-line-card" key={line.supplier_line_id}>
+              <div className="line-card-header">
+                <strong>Line {line.supplier_line_id}</strong>
+                <StatusBadge status={line.status} />
+              </div>
+              <div className="summary-grid">
+                <Metric label="Supplier part" value={line.supplier_part_number} />
+                <Metric label="Internal part" value={line.internal_part_number ?? "-"} />
+                <Metric label="Quantity" value={`${line.quantity} ${line.unit}`} />
+                <Metric label="Unit price" value={`$${line.unit_price}`} />
+                <Metric label="Promised date" value={line.promised_date} />
+                <Metric label="Normalized unit" value={line.normalized_unit ?? "-"} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="preview-empty">
+          No canonical confirmation lines were produced. Review findings or inspect the raw EDI.
+        </div>
+      )}
+
+      <small className="muted">
+        Final validation, idempotency checks, policy evaluation, and ERP actions occur only after ingestion.
+      </small>
+    </div>
   );
 }
 
@@ -1123,6 +1384,182 @@ function ErpUpdateSnapshot({ workflow }) {
   );
 }
 
+function MockErpDashboard({ context, onLoadSample }) {
+  const purchaseOrders = context?.purchase_orders ?? [];
+  const suppliers = context?.suppliers ?? [];
+  const inventoryByPart = new Map((context?.inventory ?? []).map((position) => [position.part_number, position]));
+  const demandByPart = new Map((context?.demand ?? []).map((forecast) => [forecast.part_number, forecast]));
+  const supplierById = new Map(suppliers.map((supplier) => [supplier.supplier_id, supplier]));
+  const primaryPo = purchaseOrders[0];
+  const primarySupplier = primaryPo ? supplierById.get(primaryPo.supplier_id) : null;
+
+  if (!context) {
+    return (
+      <section className="panel">
+        <div className="panel-title">Mock ERP</div>
+        <p className="muted">Loading mock ERP context.</p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="mock-erp-view">
+      <section className="panel erp-context-hero">
+        <div>
+          <div className="panel-title">ERP Order Context</div>
+          <h2>{primaryPo?.purchase_order_number ?? "No purchase order"}</h2>
+          <p>
+            Review released purchase orders, supplier mappings, inventory exposure, and available supply options
+            before processing inbound X12 855 acknowledgments.
+          </p>
+        </div>
+        <div className="erp-context-actions">
+          <button onClick={() => onLoadSample("exact")}>Load exact-match acknowledgment</button>
+          <button onClick={() => onLoadSample("smallDelay")}>Load delayed acknowledgment</button>
+          <button className="primary-button" onClick={() => onLoadSample("risky")}>
+            Load changed acknowledgment
+          </button>
+          <button onClick={() => onLoadSample("qualifier")}>Load ambiguous acknowledgment</button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">Open Purchase Orders</div>
+        <div className="erp-po-grid">
+          {purchaseOrders.map((po) => {
+            const supplier = supplierById.get(po.supplier_id);
+            return (
+              <div className="erp-po-card" key={po.purchase_order_number}>
+                <div className="erp-po-header">
+                  <div>
+                    <strong>{po.purchase_order_number}</strong>
+                    <span>{supplier?.name ?? po.supplier_id}</span>
+                  </div>
+                  <StatusBadge status={po.status} />
+                </div>
+                <div className="summary-grid">
+                  <Metric label="Supplier" value={po.supplier_id} />
+                  <Metric label="Currency" value={po.currency} />
+                  <Metric label="Site" value={po.site_id} />
+                  <Metric label="Lines" value={po.lines.length} />
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Line</th>
+                      <th>Part</th>
+                      <th>Qty</th>
+                      <th>Unit price</th>
+                      <th>Requested date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {po.lines.map((line) => (
+                      <tr key={line.line_id}>
+                        <td>{line.line_id}</td>
+                        <td>{line.part_number}</td>
+                        <td>
+                          {line.quantity} {line.unit}
+                        </td>
+                        <td>${line.unit_price}</td>
+                        <td>{line.requested_date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="erp-context-grid">
+        <div className="panel">
+          <div className="panel-title">Supplier Context</div>
+          {primarySupplier ? (
+            <div className="context-stack">
+              <Metric label="Supplier" value={`${primarySupplier.name} (${primarySupplier.supplier_id})`} />
+              <Metric label="Email" value={primarySupplier.email} />
+              <Metric label="Escalation" value={primarySupplier.escalation_email ?? "-"} />
+              <div className="mini-section">
+                <strong>Part aliases</strong>
+                {Object.entries(primarySupplier.part_aliases ?? {}).map(([supplierPart, internalPart]) => (
+                  <span key={supplierPart}>
+                    {supplierPart} to {internalPart}
+                  </span>
+                ))}
+              </div>
+              <div className="mini-section">
+                <strong>Unit conversions</strong>
+                {Object.entries(primarySupplier.unit_conversions ?? {}).map(([conversion, factor]) => (
+                  <span key={conversion}>
+                    {conversion} = {factor}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="muted">No supplier context available.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">Inventory And Demand</div>
+          <div className="inventory-grid">
+            {(primaryPo?.lines ?? []).map((line) => {
+              const inventory = inventoryByPart.get(line.part_number);
+              const demand = demandByPart.get(line.part_number);
+              const coverageDays = demand?.daily_demand
+                ? Math.floor((inventory?.on_hand ?? 0) / demand.daily_demand)
+                : null;
+              return (
+                <div className="inventory-card" key={line.line_id}>
+                  <strong>{line.part_number}</strong>
+                  <span>On hand: {inventory?.on_hand ?? 0}</span>
+                  <span>Daily demand: {demand?.daily_demand ?? 0}</span>
+                  <small>Coverage: {coverageDays === null ? "-" : `${coverageDays} day(s)`}</small>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="erp-context-grid">
+        <div className="panel">
+          <div className="panel-title">Supplier Performance</div>
+          {primarySupplier ? (
+            <div className="summary-grid">
+              {Object.entries(context.supplier_performance?.[primarySupplier.supplier_id] ?? {}).map(([key, value]) => (
+                <Metric key={key} label={fieldLabel(key)} value={formatValue(value)} />
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No performance data available.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">Alternate Suppliers</div>
+          <div className="alternate-supplier-list">
+            {Object.entries(context.alternate_suppliers ?? {}).map(([partNumber, alternates]) => (
+              <div className="alternate-supplier-group" key={partNumber}>
+                <strong>{partNumber}</strong>
+                {alternates.map((alternate) => (
+                  <span key={`${partNumber}-${alternate.supplier_id}`}>
+                    {alternate.supplier_name}: {alternate.available_quantity} available, {alternate.lead_time_days} day lead time, $
+                    {alternate.unit_price}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LineSnapshot({ title, rows }) {
   return (
     <div className="line-snapshot">
@@ -1203,22 +1640,59 @@ function StatusBadge({ status }) {
 
 function defaultSupplierResponse(workflow, decisionMode) {
   const poNumber = workflow.confirmation?.purchase_order_number ?? "the purchase order";
+  const issueText = supplierIssueSummary(workflow);
   if (decisionMode === "reject") {
     return {
       subject: `Purchase Order ${poNumber} changes not accepted`,
-      body: `Thank you for confirming purchase order ${poNumber}. We cannot accept the proposed changes at this time.`,
+      body: `Thank you for confirming purchase order ${poNumber}. We cannot accept the proposed changes at this time. ${issueText}`,
     };
   }
   if (decisionMode === "clarification") {
+    const supplierDraft = safeClarificationDraft(workflow.operator_brief?.supplier_message_draft);
     return {
       subject: `Clarification needed for purchase order ${poNumber}`,
-      body: `Thank you for confirming purchase order ${poNumber}. We need clarification before the acknowledgment can be accepted.`,
+      body:
+        supplierDraft
+        || `Thank you for confirming purchase order ${poNumber}. We need clarification before the acknowledgment can be accepted. Please review: ${issueText}`,
     };
   }
   return {
     subject: `Purchase Order ${poNumber} confirmation`,
     body: `Thank you for confirming purchase order ${poNumber}. The approved confirmation has been recorded.`,
   };
+}
+
+function safeClarificationDraft(draft) {
+  if (!draft) return "";
+  const unsafePattern = /approved confirmation|has been recorded|updated the purchase order|\berp\b|we accept|approved/i;
+  return unsafePattern.test(draft) ? "" : draft;
+}
+
+function supplierIssueSummary(workflow) {
+  const issues = [
+    ...(workflow.risk_investigation?.observations ?? []).slice(0, 3),
+    workflow.risk_investigation?.recommendation,
+    ...(workflow.policy_decision?.reasons ?? []),
+    ...(workflow.confirmation?.errors ?? []),
+    ...(workflow.confirmation?.warnings ?? []),
+    ...(workflow.parse_result?.errors ?? []),
+    ...(workflow.parse_result?.warnings ?? []),
+    ...(workflow.comparisons ?? []).flatMap((comparison) =>
+      comparison.differences.map(
+        (difference) =>
+          `Line ${comparison.line_id} ${fieldLabel(difference.field)} changed from ${formatValue(difference.original)} to ${formatValue(difference.confirmed)}.`,
+      ),
+    ),
+    ...(workflow.impacts ?? [])
+      .filter((impact) => impact.stockout_risk)
+      .map((impact) => `Line ${impact.line_id} has projected shortage risk of ${impact.projected_shortage_quantity} unit(s).`),
+  ].filter(Boolean);
+  const deduped = Array.from(new Set(issues));
+  return deduped.slice(0, 6).join(" ") || "Please confirm the updated quantity, price, delivery date, and any partial shipment plan.";
+}
+
+function fieldLabel(field) {
+  return String(field ?? "value").replaceAll("_", " ");
 }
 
 function ProfileManager({ profiles, selectedProfile, onSelect, onCreate, onSave, onPublish, onArchive, busy }) {

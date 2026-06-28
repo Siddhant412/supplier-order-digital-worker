@@ -55,6 +55,8 @@ class WorkflowEngine:
         investigation_model: str = "gpt-5.4-mini",
         investigation_timeout_seconds: float = 20.0,
         enable_llm_investigation: bool = False,
+        briefing_service=None,
+        auto_operator_brief: bool = False,
     ) -> None:
         self.store = store
         self.erp = erp
@@ -72,6 +74,8 @@ class WorkflowEngine:
         )
         self.policies = policies
         self.notifications = notifications or NotificationService()
+        self.briefing_service = briefing_service
+        self.auto_operator_brief = auto_operator_brief
         self.graph = self._build_graph()
 
     def start(self, request: IngestRequest) -> WorkflowRecord:
@@ -123,6 +127,7 @@ class WorkflowEngine:
             self.graph.invoke(state)
         else:
             self._run_without_langgraph(state)
+        self._maybe_generate_operator_brief(workflow.workflow_id)
         return self.store.get_workflow(workflow.workflow_id)
 
     def approve(self, workflow_id: str, request: ApprovalRequest) -> WorkflowRecord:
@@ -637,3 +642,25 @@ class WorkflowEngine:
             "tools": [request.tool for request in investigation.tool_requests],
             "recommendation": investigation.recommendation,
         }
+
+    def _maybe_generate_operator_brief(self, workflow_id: str) -> None:
+        if not self.auto_operator_brief or self.briefing_service is None:
+            return
+        workflow = self.store.get_workflow(workflow_id)
+        if workflow.operator_brief is not None:
+            return
+        if workflow.status not in {
+            WorkflowStatus.AWAITING_APPROVAL,
+            WorkflowStatus.MANUAL_REVIEW,
+            WorkflowStatus.DEAD_LETTER,
+            WorkflowStatus.RETRY_PENDING,
+        }:
+            return
+        brief = self.briefing_service.generate(workflow)
+        workflow.operator_brief = brief
+        self.store.add_audit(
+            workflow,
+            "OPERATOR_BRIEF_GENERATED",
+            "Operator brief generated automatically from workflow facts.",
+            {"source": brief.source, "model": brief.model, "metadata": brief.metadata, "auto_generated": True},
+        )

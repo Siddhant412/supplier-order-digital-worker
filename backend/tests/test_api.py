@@ -27,6 +27,8 @@ def test_api_ingests_risky_workflow_and_approval_resumes_execution():
     assert workflow["status"] == "AWAITING_APPROVAL"
     assert workflow["policy_decision"]["decision"] == "REQUIRE_APPROVAL"
     assert workflow["erp_update_command"] is None
+    assert workflow["operator_brief"] is not None
+    assert workflow["operator_brief"]["supplier_message_draft"]
 
     approve_response = client.post(
         f"/api/workflows/{workflow['workflow_id']}/approve",
@@ -52,12 +54,14 @@ def test_api_exposes_workflow_execution_trace():
     assert trace_response.status_code == 200
     trace = trace_response.json()
     steps_by_id = {step["step_id"]: step for step in trace}
+    step_order = [step["step_id"] for step in trace]
     assert steps_by_id["parse"]["langgraph_node"] == "parse_edi_syntax"
     assert steps_by_id["interpret"]["langgraph_node"] == "interpret_edi_semantics"
     assert steps_by_id["investigate"]["langgraph_node"] == "investigate_risk"
     assert steps_by_id["investigate"]["status"] == "completed"
     assert steps_by_id["approval"]["owner"] == "human"
     assert steps_by_id["approval"]["status"] == "waiting"
+    assert step_order.index("approval") < step_order.index("brief") < step_order.index("erp_update")
     assert steps_by_id["erp_update"]["status"] == "waiting"
     assert steps_by_id["notify"]["status"] == "skipped"
 
@@ -74,6 +78,35 @@ def test_api_exposes_workflow_execution_trace():
     assert completed_by_id["notify"]["status"] == "completed"
     assert completed_by_id["complete"]["status"] == "completed"
     client.post("/api/mock-erp/reset")
+
+
+def test_api_previews_edi_without_creating_workflow():
+    client = TestClient(app)
+    before_count = len(client.get("/api/workflows").json())
+
+    preview_response = client.post("/api/edi/preview", json={"edi_text": load_sample("risky-change.edi")})
+    workflows_after_preview = client.get("/api/workflows").json()
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["summary"]["purchase_order_number"] == "PO-1042"
+    assert preview["summary"]["supplier_id"] == "SUP-100"
+    assert preview["summary"]["control_number"] == "0002"
+    assert preview["summary"]["validation_status"] == "VALID"
+    assert preview["confirmation"]["lines"][0]["supplier_part_number"] == "ACME-M100"
+    assert preview["confirmation"]["lines"][0]["quantity"] == 450
+    assert len(workflows_after_preview) == before_count
+
+
+def test_api_preview_surfaces_semantic_review_findings():
+    client = TestClient(app)
+
+    preview_response = client.post("/api/edi/preview", json={"edi_text": load_sample("unsupported-qualifier.edi")})
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["summary"]["validation_status"] == "MANUAL_REVIEW_REQUIRED"
+    assert "Unsupported or ambiguous date qualifier: 999." in preview["confirmation"]["errors"]
 
 
 def test_api_requests_clarification_with_edited_supplier_response():
@@ -209,6 +242,28 @@ def test_api_resets_mock_erp_seed_state():
     assert reset_response.status_code == 200
     assert reset_response.json()["status"] == "reset"
     assert reset_po["lines"][0]["quantity"] == 500
+
+
+def test_api_exposes_mock_erp_operational_context():
+    client = TestClient(app)
+    client.post("/api/mock-erp/reset")
+
+    context_response = client.get("/api/mock-erp/context")
+    purchase_orders_response = client.get("/api/mock-erp/purchase-orders")
+
+    assert context_response.status_code == 200
+    context = context_response.json()
+    po = context["purchase_orders"][0]
+    assert po["purchase_order_number"] == "PO-1042"
+    assert po["supplier_id"] == "SUP-100"
+    assert po["lines"][0]["part_number"] == "MOTOR-100"
+    assert po["lines"][0]["quantity"] == 500
+    assert context["suppliers"][0]["part_aliases"]["ACME-M100"] == "MOTOR-100"
+    assert any(position["part_number"] == "MOTOR-100" for position in context["inventory"])
+    assert "MOTOR-100" in context["alternate_suppliers"]
+
+    assert purchase_orders_response.status_code == 200
+    assert purchase_orders_response.json()[0]["purchase_order_number"] == "PO-1042"
 
 
 def test_api_exposes_liveness_readiness_and_metrics():

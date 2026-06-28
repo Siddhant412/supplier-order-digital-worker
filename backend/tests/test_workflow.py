@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.domain.models import ApprovalRequest, IngestRequest, ProfileUpdateRequest, WorkflowStatus
+from app.services.briefing import BriefingService
 from app.services.mock_erp import MockERPAdapter
 from app.services.notification import NotificationService
 from app.services.policies import PolicyConfigRepository
@@ -72,6 +73,25 @@ def test_risky_change_waits_for_approval_then_completes():
     assert approved.erp_update_command is not None
 
 
+def test_auto_operator_brief_is_generated_for_human_attention_workflow():
+    engine = WorkflowEngine(
+        InMemoryStore(),
+        MockERPAdapter(),
+        TradingPartnerProfileRepository(),
+        PolicyConfigRepository(),
+        briefing_service=BriefingService(api_key=None),
+        auto_operator_brief=True,
+    )
+
+    workflow = engine.start(IngestRequest(edi_text=load_sample("risky-change.edi")))
+
+    assert workflow.status == WorkflowStatus.AWAITING_APPROVAL
+    assert workflow.operator_brief is not None
+    assert workflow.operator_brief.supplier_message_draft
+    assert "quantity" in workflow.operator_brief.supplier_message_draft
+    assert any(event.event_type == "OPERATOR_BRIEF_GENERATED" for event in workflow.audit_events)
+
+
 def test_approval_uses_edited_supplier_response():
     engine = make_engine()
 
@@ -137,6 +157,28 @@ def test_request_clarification_sends_supplier_response_without_erp_update():
     assert clarified.supplier_response.body == "Can you confirm an expedited partial delivery for line 1?"
     assert clarified.supplier_response.status == "sent"
     assert any(event.event_type == "CLARIFICATION_REQUESTED" for event in clarified.audit_events)
+
+
+def test_default_clarification_response_includes_specific_risky_issues():
+    engine = make_engine()
+
+    workflow = engine.start(IngestRequest(edi_text=load_sample("risky-change.edi")))
+    clarified = engine.request_clarification(workflow.workflow_id, ApprovalRequest())
+
+    assert clarified.supplier_response is not None
+    assert "quantity changed" in clarified.supplier_response.body
+    assert "unit_price" in clarified.supplier_response.body or "unit price" in clarified.supplier_response.body
+    assert "shortage risk" in clarified.supplier_response.body
+
+
+def test_default_manual_review_clarification_response_includes_validation_issue():
+    engine = make_engine()
+
+    workflow = engine.start(IngestRequest(edi_text=load_sample("unsupported-qualifier.edi")))
+    clarified = engine.request_clarification(workflow.workflow_id, ApprovalRequest())
+
+    assert clarified.supplier_response is not None
+    assert "Unsupported or ambiguous date qualifier: 999" in clarified.supplier_response.body
 
 
 def test_manual_review_can_request_clarification_without_erp_update():

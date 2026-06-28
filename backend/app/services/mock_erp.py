@@ -91,6 +91,22 @@ class MockERPAdapter:
             raise TransientERPError(f"Temporary ERP lookup outage for {po_number}.")
         return deepcopy(self.purchase_orders[po_number])
 
+    def list_purchase_orders(self) -> list[PurchaseOrder]:
+        return deepcopy(list(self.purchase_orders.values()))
+
+    def list_suppliers(self) -> list[Supplier]:
+        return deepcopy(list(self.suppliers.values()))
+
+    def operational_context(self) -> dict:
+        return {
+            "purchase_orders": [po.model_dump(mode="json") for po in self.list_purchase_orders()],
+            "suppliers": [supplier.model_dump(mode="json") for supplier in self.list_suppliers()],
+            "inventory": [position.model_dump(mode="json") for position in deepcopy(list(self.inventory.values()))],
+            "demand": [forecast.model_dump(mode="json") for forecast in deepcopy(list(self.demand.values()))],
+            "supplier_performance": deepcopy(self.supplier_performance),
+            "alternate_suppliers": deepcopy(self.alternate_suppliers),
+        }
+
     def get_supplier(self, supplier_id: str) -> Supplier:
         return self.suppliers[supplier_id]
 

@@ -42,7 +42,7 @@ class NotificationService:
         confirmation: SupplierConfirmation,
         comments: str = "",
     ) -> SupplierResponse:
-        reason_text = comments or "The submitted changes cannot be accepted under the current purchasing policy."
+        reason_text = comments or self._issue_summary(workflow)
         body = (
             f"Thank you for confirming purchase order {confirmation.purchase_order_number}. "
             f"We cannot accept the proposed changes at this time. {reason_text}"
@@ -62,10 +62,10 @@ class NotificationService:
         confirmation: SupplierConfirmation,
         comments: str = "",
     ) -> SupplierResponse:
-        request_text = comments or "Please confirm the updated quantity, price, delivery date, and any partial shipment plan."
+        request_text = comments or self._issue_summary(workflow)
         body = (
             f"Thank you for confirming purchase order {confirmation.purchase_order_number}. "
-            f"We need clarification before the acknowledgment can be accepted. {request_text}"
+            f"We need clarification before the acknowledgment can be accepted. Please review: {request_text}"
         )
         return SupplierResponse(
             workflow_id=workflow.workflow_id,
@@ -86,3 +86,35 @@ class NotificationService:
             raise TransientNotificationError(f"Temporary notification outage for control {control_number}.")
         response.status = "sent"
         return response
+
+    def _issue_summary(self, workflow: WorkflowRecord) -> str:
+        issues: list[str] = []
+        if workflow.risk_investigation:
+            issues.extend(workflow.risk_investigation.observations[:3])
+            if workflow.risk_investigation.recommendation:
+                issues.append(workflow.risk_investigation.recommendation)
+        if workflow.policy_decision and workflow.policy_decision.reasons:
+            issues.extend(workflow.policy_decision.reasons)
+        if workflow.confirmation:
+            issues.extend(workflow.confirmation.errors)
+            issues.extend(workflow.confirmation.warnings)
+        if workflow.parse_result:
+            issues.extend(workflow.parse_result.errors)
+            issues.extend(workflow.parse_result.warnings)
+        for comparison in workflow.comparisons:
+            for difference in comparison.differences:
+                issues.append(
+                    f"Line {comparison.line_id} {difference.field} changed from "
+                    f"{difference.original} to {difference.confirmed}."
+                )
+        for impact in workflow.impacts:
+            if impact.stockout_risk:
+                issues.append(
+                    f"Line {impact.line_id} has projected shortage risk of "
+                    f"{impact.projected_shortage_quantity} unit(s)."
+                )
+        deduped = []
+        for issue in issues:
+            if issue and issue not in deduped:
+                deduped.append(issue)
+        return " ".join(deduped[:6]) or "Please confirm the updated quantity, price, delivery date, and any partial shipment plan."

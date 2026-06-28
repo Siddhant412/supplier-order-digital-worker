@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.dependencies import briefing_service, erp, evaluation_runner, policies, profiles, store, workflow_engine
 from app.domain.models import (
     ApprovalRequest,
+    EDIPreviewResponse,
     EvaluationRun,
     ExecutionTraceStep,
     IngestRequest,
@@ -116,6 +117,25 @@ def ingest(request: IngestRequest) -> WorkflowRecord:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/edi/preview", response_model=EDIPreviewResponse)
+def preview_edi(request: IngestRequest) -> EDIPreviewResponse:
+    parse_result = workflow_engine.parser.parse(request.edi_text)
+    confirmation = workflow_engine.interpreter.interpret(parse_result)
+    return EDIPreviewResponse(
+        parse_result=parse_result,
+        confirmation=confirmation,
+        summary={
+            "purchase_order_number": confirmation.purchase_order_number,
+            "supplier_id": confirmation.supplier_id,
+            "control_number": confirmation.source_control_number,
+            "transaction_type": parse_result.transaction_type,
+            "edi_version": parse_result.edi_version,
+            "validation_status": confirmation.validation_status.value,
+            "line_count": len(confirmation.lines),
+        },
+    )
+
+
 @app.get("/api/workflows", response_model=list[WorkflowRecord])
 def list_workflows() -> list[WorkflowRecord]:
     return store.list_workflows()
@@ -136,6 +156,11 @@ def get_workflow_execution_trace(workflow_id: str) -> list[ExecutionTraceStep]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found.") from exc
     return build_execution_trace(workflow)
+
+
+@app.get("/api/mock-erp/context")
+def get_mock_erp_context() -> dict:
+    return erp.operational_context()
 
 
 @app.post("/api/workflows/{workflow_id}/approve", response_model=WorkflowRecord)
@@ -277,6 +302,11 @@ def archive_policy(policy_id: str) -> PolicyConfig:
         return policies.archive(policy_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Policy not found.") from exc
+
+
+@app.get("/api/mock-erp/purchase-orders")
+def list_purchase_orders():
+    return erp.list_purchase_orders()
 
 
 @app.get("/api/mock-erp/purchase-orders/{po_number}")

@@ -41,6 +41,10 @@ class BriefingService:
                         "You create concise procurement operator briefs from validated workflow facts. "
                         "Use only the provided JSON facts. Do not invent suppliers, prices, dates, approvals, "
                         "ERP actions, or EDI details. Do not approve, reject, authorize, or claim an ERP update. "
+                        "For supplier_message_draft, write an editable supplier-facing follow-up that names the "
+                        "specific issue(s) needing clarification when the workflow is awaiting approval, manual "
+                        "review, or dead-letter review. Do not imply the buyer has approved, rejected, or updated "
+                        "the purchase order unless the facts explicitly show that status. "
                         "Return only a JSON object with exactly these string keys: summary, risk_assessment, "
                         "recommended_action, supplier_message_draft."
                     ),
@@ -50,6 +54,7 @@ class BriefingService:
         )
         content = response.output_text.strip()
         parsed = self._parse_structured_output(content)
+        self._validate_supplier_draft(workflow, parsed["supplier_message_draft"])
         return OperatorBrief(
             workflow_id=workflow.workflow_id,
             summary=parsed["summary"],
@@ -121,16 +126,50 @@ class BriefingService:
         if workflow.supplier_response:
             return workflow.supplier_response.body
         if workflow.status == WorkflowStatus.AWAITING_APPROVAL:
+            issue_summary = self._issue_summary(workflow)
             return (
-                f"Thank you for confirming purchase order {po_number}. We are reviewing the proposed changes "
-                "and will respond once the review is complete."
+                f"Thank you for confirming purchase order {po_number}. We need clarification before the "
+                f"acknowledgment can be accepted. Please review: {issue_summary}"
             )
         if workflow.status in {WorkflowStatus.MANUAL_REVIEW, WorkflowStatus.DEAD_LETTER}:
+            issue_summary = self._issue_summary(workflow)
             return (
-                f"Thank you for sending the acknowledgment for purchase order {po_number}. We need to review "
-                "the submitted details before they can be accepted."
+                f"Thank you for sending the acknowledgment for purchase order {po_number}. We need to clarify "
+                f"the following before it can be accepted: {issue_summary}"
             )
         return f"Thank you for confirming purchase order {po_number}."
+
+    def _issue_summary(self, workflow: WorkflowRecord) -> str:
+        issues: list[str] = []
+        if workflow.risk_investigation:
+            issues.extend(workflow.risk_investigation.observations[:3])
+            if workflow.risk_investigation.recommendation:
+                issues.append(workflow.risk_investigation.recommendation)
+        if workflow.policy_decision and workflow.policy_decision.reasons:
+            issues.extend(workflow.policy_decision.reasons)
+        if workflow.confirmation:
+            issues.extend(workflow.confirmation.errors)
+            issues.extend(workflow.confirmation.warnings)
+        if workflow.parse_result:
+            issues.extend(workflow.parse_result.errors)
+            issues.extend(workflow.parse_result.warnings)
+        for comparison in workflow.comparisons:
+            for difference in comparison.differences:
+                issues.append(
+                    f"Line {comparison.line_id} {difference.field} changed from "
+                    f"{difference.original} to {difference.confirmed}."
+                )
+        for impact in workflow.impacts:
+            if impact.stockout_risk:
+                issues.append(
+                    f"Line {impact.line_id} has projected shortage risk of "
+                    f"{impact.projected_shortage_quantity} unit(s)."
+                )
+        deduped = []
+        for issue in issues:
+            if issue and issue not in deduped:
+                deduped.append(issue)
+        return " ".join(deduped[:6]) or "Please confirm the updated quantity, price, delivery date, and any partial shipment plan."
 
     def _workflow_facts(self, workflow: WorkflowRecord) -> dict[str, Any]:
         facts = {
@@ -158,6 +197,21 @@ class BriefingService:
                 raise ValueError(f"Operator brief field {key} must be a non-empty string.")
             parsed[key] = value.strip()
         return parsed
+
+    def _validate_supplier_draft(self, workflow: WorkflowRecord, draft: str) -> None:
+        normalized = draft.lower()
+        if workflow.status in {WorkflowStatus.AWAITING_APPROVAL, WorkflowStatus.MANUAL_REVIEW, WorkflowStatus.DEAD_LETTER}:
+            forbidden = [
+                "approved confirmation",
+                "has been recorded",
+                "we accept",
+                "accepted",
+                "approved",
+                "updated the purchase order",
+                "erp",
+            ]
+            if any(term in normalized for term in forbidden):
+                raise ValueError("Supplier draft implies approval or ERP action before authorization.")
 
     def _fallback_with_reason(self, fallback: OperatorBrief, reason: str) -> OperatorBrief:
         fallback.metadata = {

@@ -346,6 +346,12 @@ class IngestRequest(BaseModel):
     edi_text: str
 
 
+class EDIPreviewResponse(BaseModel):
+    parse_result: EDIParseResult
+    confirmation: SupplierConfirmation
+    summary: dict[str, Any]
+
+
 class ApprovalRequest(BaseModel):
     approved_by: str = "operator@procureops.local"
     comments: str = ""
