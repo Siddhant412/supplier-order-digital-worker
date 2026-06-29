@@ -402,13 +402,20 @@ function App() {
     }
   }
 
-  async function resetMockErp() {
+  async function resetWorkspace() {
+    const confirmed = window.confirm(
+      "Reset workflow history, evaluation runs, idempotency records, and mock ERP data? Profiles and policies will be preserved.",
+    );
+    if (!confirmed) return;
     setBusy(true);
     setError("");
     try {
-      await fetchJson("/api/mock-erp/reset", {
+      await fetchJson("/api/system/reset", {
         method: "POST",
       });
+      setSelectedId(null);
+      setExecutionTrace([]);
+      setActiveView("mockErp");
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -530,6 +537,15 @@ function App() {
           <Metric label="Avg duration" value={formatSeconds(metrics?.average_workflow_duration_seconds)} />
           <Metric label="False autonomous action rate" value={`${metrics?.false_autonomous_action_rate ?? 0}`} />
         </section>
+
+        <section className="panel compact workspace-actions-panel">
+          <div className="panel-title">Workspace Actions</div>
+          <button onClick={resetWorkspace} disabled={busy}>
+            <RotateCcw size={16} />
+            Reset workspace
+          </button>
+          <small>Clears workflow history and restores seeded ERP data.</small>
+        </section>
       </aside>
 
       <section className="workspace">
@@ -641,7 +657,7 @@ function App() {
         )}
 
         {activeView === "evaluations" && (
-          <EvaluationDashboard runs={evaluationRuns} onRun={runEvaluations} onResetMockErp={resetMockErp} busy={busy} />
+          <EvaluationDashboard runs={evaluationRuns} onRun={runEvaluations} onResetWorkspace={resetWorkspace} busy={busy} />
         )}
       </section>
     </main>
@@ -2141,7 +2157,7 @@ function PolicyManager({ policies, selectedPolicy, onSelect, onCreate, onSave, o
   );
 }
 
-function EvaluationDashboard({ runs, onRun, onResetMockErp, busy }) {
+function EvaluationDashboard({ runs, onRun, onResetWorkspace, busy }) {
   const latestRun = runs[0];
 
   return (
@@ -2158,9 +2174,9 @@ function EvaluationDashboard({ runs, onRun, onResetMockErp, busy }) {
           <Metric label="Total" value={latestRun?.total ?? 0} />
         </div>
         <div className="evaluation-actions">
-          <button onClick={onResetMockErp} disabled={busy}>
+          <button onClick={onResetWorkspace} disabled={busy}>
             <RotateCcw size={16} />
-            Reset mock ERP
+            Reset workspace
           </button>
           <button className="primary-button" onClick={onRun} disabled={busy}>
             <FlaskConical size={16} />

@@ -236,6 +236,24 @@ button:disabled {
   gap: 12px;
 }
 
+.workspace-actions-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-actions-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.workspace-actions-panel small {
+  color: #657286;
+  line-height: 1.35;
+}
+
 .mock-erp-view {
   display: grid;
   gap: 16px;

@@ -244,6 +244,34 @@ def test_api_resets_mock_erp_seed_state():
     assert reset_po["lines"][0]["quantity"] == 500
 
 
+def test_api_resets_operational_workspace_state():
+    client = TestClient(app)
+    client.post("/api/system/reset")
+
+    workflow = client.post("/api/ingest", json={"edi_text": load_sample("risky-change.edi")}).json()
+    approved = client.post(
+        f"/api/workflows/{workflow['workflow_id']}/approve",
+        json={"approved_by": "operator@procureops.local", "comments": "Mutate state before reset."},
+    ).json()
+    evaluation = client.post("/api/evaluations/run").json()
+
+    assert approved["status"] == "COMPLETED"
+    assert evaluation["total"] > 0
+    assert client.get("/api/workflows").json()
+    assert client.get("/api/evaluations/runs").json()
+    assert client.get("/api/mock-erp/purchase-orders/PO-1042").json()["lines"][0]["quantity"] == 450
+
+    reset_response = client.post("/api/system/reset")
+
+    assert reset_response.status_code == 200
+    assert reset_response.json()["status"] == "reset"
+    assert client.get("/api/workflows").json() == []
+    assert client.get("/api/evaluations/runs").json() == []
+    assert client.get("/api/mock-erp/purchase-orders/PO-1042").json()["lines"][0]["quantity"] == 500
+    assert client.get("/api/profiles").json()
+    assert client.get("/api/policies").json()
+
+
 def test_api_exposes_mock_erp_operational_context():
     client = TestClient(app)
     client.post("/api/mock-erp/reset")

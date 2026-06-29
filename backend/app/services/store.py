@@ -32,6 +32,8 @@ class WorkflowStore(Protocol):
 
     def list_evaluation_runs(self) -> list[EvaluationRun]: ...
 
+    def reset_operational_data(self) -> None: ...
+
     def add_audit(
         self,
         workflow: WorkflowRecord,
@@ -81,6 +83,12 @@ class InMemoryStore:
 
     def list_evaluation_runs(self) -> list[EvaluationRun]:
         return sorted(self.evaluation_runs.values(), key=lambda run: run.created_at, reverse=True)
+
+    def reset_operational_data(self) -> None:
+        self.workflows.clear()
+        self.idempotency_index.clear()
+        self.erp_update_index.clear()
+        self.evaluation_runs.clear()
 
     def add_audit(
         self,

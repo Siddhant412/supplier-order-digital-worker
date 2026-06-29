@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, create_engine, select
+from sqlalchemy import DateTime, Integer, String, create_engine, delete, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -250,6 +250,18 @@ class DatabaseWorkflowStore:
         with self.session_factory() as session:
             rows = session.scalars(select(EvaluationRunRow).order_by(EvaluationRunRow.created_at.desc())).all()
             return [EvaluationRun.model_validate(row.data) for row in rows]
+
+    def reset_operational_data(self) -> None:
+        with self.session_factory() as session:
+            for table in (
+                AuditEventRow,
+                IdempotencyKeyRow,
+                ERPUpdateKeyRow,
+                EvaluationRunRow,
+                WorkflowRow,
+            ):
+                session.execute(delete(table))
+            session.commit()
 
     def add_audit(
         self,

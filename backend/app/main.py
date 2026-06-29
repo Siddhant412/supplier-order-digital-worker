@@ -332,6 +332,13 @@ def reset_mock_erp() -> dict[str, str]:
     return {"status": "reset"}
 
 
+@app.post("/api/system/reset")
+def reset_system() -> dict[str, str]:
+    store.reset_operational_data()
+    erp.reset()
+    return {"status": "reset"}
+
+
 @app.post("/api/evaluations/run", response_model=EvaluationRun)
 def run_evaluations() -> EvaluationRun:
     try:
