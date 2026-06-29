@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from time import perf_counter
 
 from fastapi import FastAPI, HTTPException
@@ -32,9 +33,17 @@ logger = logging.getLogger("procureops.api")
 
 app = FastAPI(title="ProcureOps AI API", version="0.1.0")
 
+
+def cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
